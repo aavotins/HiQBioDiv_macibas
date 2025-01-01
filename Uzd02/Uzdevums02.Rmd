@@ -3,7 +3,7 @@ title: "Otrais uzdevums: vektordati, to ģeometrijas, atribūti un failu formāt
 output: rmarkdown::github_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE} 
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
