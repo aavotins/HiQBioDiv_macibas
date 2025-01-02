@@ -226,31 +226,31 @@ Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2024-12-15**
 
 2. uzdevums: [vektordati, to ģeometrijas, atribūti un failu formāti](./Uzd02/Uzdevums02.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-01-10**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2025-01-10**
 
 3. uzdevums: [rastra dati, rasterizēšana un kodējumi](./Uzd03/Uzdevums03.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-01-10**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2025-01-10**
 
 4. uzdevums: [funkcijas, cikli, vienkodola un daudzkodolu skaitļošana](./Uzd04/Uzdevums04.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-01-10**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2025-01-10**
 
 5. uzdevums: [procesu dalīšana un rezultātu apvienošana](./Uzd05/Uzdevums05.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-01-15**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2025-01-15**
 
-6. uzdevums: [dažādu slāņu apvienošana vienotai ainavas aprakstīšanai](./Uzd06/Uzdevums06.md) 
+6. uzdevums: [dažādu slāņu savienošana vienotai ainavas aprakstīšanai](./Uzd06/Uzdevums06.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-01-15**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2025-01-15**
 
 7. uzdevums: [zonālā statistika](./Uzd07/Uzdevums07.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-01-15**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2025-01-15**
 
 8. uzdevums: [GEE](./Uzd08/Uzdevums08.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-01-15**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **2025-01-15**
 
 9. uzdevums: [sugas izvēle un tās ekoloģijas apraksts](./Uzd09/Uzdevums09.md)  
 (modelēšanai un aizsardzības telpiskajai plānošanai) 
