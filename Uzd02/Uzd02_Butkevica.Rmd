@@ -7,7 +7,7 @@ output: github_document
 
 # 1. uzdevums
 
-Izmantojot 2651. nodaļas datus (nodala2651), salīdziniet ESRI shapefile, GeoPackage un geoparquet (ja vēlaties arī ESRI File Geodatabase, kuras uzrakstīšanai var nākties izmantot citu programmu) failu:
+Izmantojot 2651. nodaļas datus (nodala2651), salīdziniet ESRI shapefile, GeoPackage un geoparquet (ja vēlaties arī ESRI File Geodatabase, kuras uzrakstīšanai var nākties izmantot citu programmu) failu: 
 -   aizņemto diska vietu;
 -   ielasīšanas ātrumu vismaz 10 ielasīšanas izmēģinājumos.
 

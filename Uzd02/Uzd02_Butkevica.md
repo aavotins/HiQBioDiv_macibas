@@ -10,7 +10,7 @@ GeoPackage un geoparquet (ja vēlaties arī ESRI File Geodatabase, kuras
 uzrakstīšanai var nākties izmantot citu programmu) failu: - aizņemto
 diska vietu; - ielasīšanas ātrumu vismaz 10 ielasīšanas izmēģinājumos.
 
-## Faila lejupielāde un izpakošana
+## Faila lejupielāde un izpakošana 
 
 Izveidosim atsevišķus mainīgos, kuros saglabāsim lejupielādes saiti,
 lejupielādes ceļu un izpakošanas ceļu:
