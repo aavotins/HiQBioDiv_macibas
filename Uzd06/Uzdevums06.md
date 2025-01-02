@@ -1,23 +1,152 @@
-Sestais uzdevums: dažādu slāņu apvienošana vienotai ainavas
+Sestais uzdevums: dažādu slāņu savienošana vienotai ainavas
 aprakstīšanai
 ================
 
 ## Termiņš
 
-Līdz 2025-01-15, izmantojot git pull -\> commit -\> push uz zaru
-“Dalibnieki”, šī uzdevuma direktorijā pievienojot .Rmd vai .qmd failu,
-kura nosaukums ir Uzd06\_\[JusuUzvards\], piemēram, `Uzd06_Avotins.Rmd`,
-kas sagatavots izvadei github dokumentā (piemēram, YAML galvenē norādot
-`output: rmarkdown::github_document`), un tā radīto izvades failu.
+Līdz 2025-01-15, izmantojot
+[fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)
+un [pull
+request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
+uz zaru “Dalibnieki”, šī uzdevuma direktorijā pievienojot .Rmd vai .qmd
+failu, kura nosaukums ir Uzd06\_\[JusuUzvards\], piemēram,
+`Uzd06_Avotins.Rmd`, kas sagatavots izvadei github dokumentā (piemēram,
+YAML galvenē norādot `output: rmarkdown::github_document`), un tā radīto
+izvades failu.
 
 ## Premise
 
-Skatīt pamata zarā
+Nopietns izaicinājums sugu izplatības modelēšanā ir vienotu un
+harmonisku ainavas aprakstu sagatavošana. Vienotības un harmoniskuma
+konspektīvs raksturojums būtu salīdzināma detalizācija un precizitāte
+visā telpā un dažādās to raksturojošās informācijas daļās, nodrošinot
+pilnu telpisko pārklājumu. Izaicinājumu pamatā ir daudz dažādu apstākļu,
+lai nosauktu dažus no tiem:
+
+1.  ģeodatu datubāzes, kuras vienmērīgi aptver visu telpu, piemēram,
+    visu Latvijas sauszemes teritoriju, visbiežāk ir ar pārāk plašām
+    zemes seguma un lietojuma veida (LULC) klasēm, lai būtu pietiekoši
+    informatīvas ekoloģiskajā modelēšanā;
+
+2.  iepriekšējo punktu var komepensēt, izmantojot dažādu (nozaru
+    specifisko) datubāzu informāciju, to apvienojot. Tomēr gandrīz nekad
+    šīs nozaru specifiskās datubāzes nav savā starpā harmonizētas ne pēc
+    lauku vērtībām, ne telpiskā pārklājuma. Ja datubāzes lauku
+    nesakritības pašas par sevi ir saprotamas (piemēram, koksnei mežā
+    viens no raksturojumiem ir krāja, kas ir nejēdzīga pazīme
+    lauksaimniecībā), ir neizbēgama ģeometriju neatbilstība - viena un
+    tā pati vieta var būt raksturota vairākās datubāzēs kā atšķirīgas
+    LULC un tajā pašā laikā, var palikt vietas, kuras nav raksturotas;
+
+3.  ģeometriju pārklāšanos, lai gan intuitīvi, nav sevišķi efektīvi
+    risināt vektordatos (atceraties iepriekšējo uzdevumu) - šos
+    ierobežojumus daudz ātrāk un jēgpilnāk var novērst, izmantojot
+    rastru. Tomēr to darot, ir jāpatur prātā (un jāiestrādā komandu
+    rindās) telpiski mazie, bet ekoloģiski jēgpilnie ainavas objekti,
+    kuri nedrīkst pazust. Šis tieši attiecas uz pārklāšanos, bet
+    nerisina iztrūkstošās vietas;
+
+4.  robu aizpildīšanai talkā nāk Zemes novērošanas sistēmu dati, bet
+    jēldatu formā tie tiešā veidā nesniedz infromāciju, kas nodrošina
+    salīdzināmu detalizāciju un precizitāti visā analīzes telpā ar
+    datubāzu informāciju, turklāt reti kad tie būs ar pamata darbā
+    plūsmai atbilstošu pikseļu izvietojumu un izšķirtspēju. Ja pikseļu
+    atbilstība ir tīri tehnoloģisks vingrinājums, daudz rūpīgāk ir
+    jādomā par informācijas harmonizēšanu;
+
+5.  informācijas harmonizēšanu var risināt ar tādiem ainavas
+    raksturojumiem, kas veido savā starpā nodalītas klases-un-vietas ar
+    atšķirīgu informācijas bagātību un uzticamību, bet iespējami mazāku
+    stratifikāciju, cenšoties saglabāt (maksimizēt) ekoloģisko (vai
+    pētījuma būtībai piederīgo) jēgu ik statistiskā kompleksa brīvības
+    pakāpei;
+
+6.  veids kā izvairīties no statistiskā kompleksa sarežģīšanas,
+    maksimizējot ekoloģisko jēgu, ir veidot plašus gradientus,
+    izvairoties no kategoriju mainīgajiem. Protams, cilvēka prāts nereti
+    liek domāt kategorijās (mēs lietas cenšamies ievietot tādās
+    kastītēs, kuru robežas mums pašiem šķiet skaidrs), bet daba
+    visbiežāk reaģē uz gradientiem bez skaidrām un viennozīmīgām
+    robežām. Šo ir nepieciešams risināt caur pētnieku izpratni un
+    domāšanu, veidojot informatīvus gradientus ekoģeogrāfisko mainīgo
+    formā. Par tiem vēlākos uzdevumos - lai līdz tiem tiktu, ir
+    nepieciešama ievades līmeņa ainavas klasifikācija (iespēja
+    uzkavēties kastītēs).
+
+Kā noprotams no iepriekšējo uzdevumu virzības un šī uzdevuma augstāk
+esošā teksta, liela loma ir rastra izmantošanai. Veidojot rastru ir
+jāpieņem vismaz divi lēmumi:
+
+- vērtību piešķiršana tikai tām šūnām, kuru centrs ir rasterizējamajā
+  objektā vai visām, kuras kaut daļēji ietilpst tajā;
+
+- ja šūnā ir vairāki rasterizējamie objekti, kādu agregāciju vai izvēli
+  starp tiem izdarīt?
+
+Ja darbam tiek izmantots pietiekoši mazs šūnas izmērs, var izmantot
+klasisko pieeju ar centru. Tas arī ļauj labāk operēt ar līnijām vai
+šauriem lineāriem objektiem, tos buferējot par nelielu, bet saprātīgu
+distanci, lai nodrošinātu nepazušanu, bet nepārspīlēto to platību.
+Savukārt daudzo objektu izaicinājumi ir risināmi veicot datu filtrēšanu
+pirms rasterizēšanas vai izvēlot atbilstošu agregācijas/kombinēšanas
+funkciju, bet šis jautājums samazinās līdz ar šūnas izmēru, jo jebkura
+izvēle atstās niecīgu ietekmi uz kopējo rezultātu, jo sevišķi
+rasterizējot kvantitātes.
+
+Lai gan kombinēšanas funkcijas izvēlei ik šūnā ir maza ar kvantitātēm,
+pie telpiski apjomīgas ģeometriju pārklāšanās dažādās datubāzēs, no
+kurām veidojamas klases, tas var radīt nejēdzīgas telpas daļas, kurās
+klases jaucas savā starpā, tādā veidā ietekmējot malu garumu aprēķinus.
+Šo visbiežāk risinam izveidojot rastra slāņus katrai interesējošajai
+klasei un tos savstarpēji klājot pāri citu citam, ar pārklāšanas secību
+nosakot tos, kuru vērtības tiks pieņemtas ik šūnā. Jo mazāka ir šūna, jo
+mazāka tam ir ietekme, bet apjomīgāki aprēķini. Izvēlei par slāņu secību
+ir jābūt ekoloģiski jēgpilnai, ņemot vērā klases pašas par sevi
+īpašības, nepazaudējot telpiski nelielus, bet ekoloģiski nozīmīgus
+objektus.
+
+Rasterizēšanai R vidē ir pieejamas dažādas funkcijas. No tām ātrākā ir
+`fasterize::fasterize`, tomēr tā atgriež {raster} nevis {terra} objektu.
+Rastra šūnu vērtību nomaiņai ir izmantojamas funkcijas `terra::subst`,
+`terra::classify`, `terra::clamp` un citas, kuru starpā ir izmantojami
+arī loģiskie nosacījumi, tostarp starp vairākiem slāņiem ar, piemēram,
+`terra::ifel`. Slāņu savienošanai ērta ir `terra::cover`, arī
+`terra::merge`. Kopumā ir vērts iepazīties ar plašo {terra}
+funkcionalitāti, tomēr neaizmirstot arī par {whitebox} un neierobežojiet
+sevi uz tikai šiem ierosinājumiem - izmēģiniet dažādas pieejas un
+risinājumus, jo sevišķi procesu mērogošanas laikā, bet to darot
+neaizmirstiet par rezultātu pārbaudi pret kādiem esošajiem industrijas
+standartiem.
 
 ## Uzdevums
 
-Skatīt pamata zarā
+Uzdevuma ietvaros veidojamo rastru pārklājumam un šūnu novietojumam ir
+jāsakrīt ar [projekta *Zenodo*
+repozitorijā](https://zenodo.org/communities/hiqbiodiv/records?q=&l=list&p=1&s=10&sort=newest)
+ievietoto [references slānim](https://zenodo.org/records/14497070)
+`LV10m_10km.tif`. Rasterizēšanas nosacījumam izmantojiet šūnas centru.
+
+1.  Rasterizējiet Lauku atbalsta dienestā reģistrētos laukus, izveidojot
+    klasi “100” (vai izmantojiet trešajā uzdevumā sagatavoto slāni, ja
+    tas ir korekts);
+
+2.  Izveidojiet rastra slāņus ar skujkoku (klase “204”), šaurlapju
+    (klase “203”), platlapju (klase “202”) un jauktu koku mežiem (klase
+    “201”) no sevis ierosinātās klasifikācijas otrajā uzdevumā.
+
+3.  Papildieniet otrā punkta rastrus, izveidojot jaunus slāņus, ar
+    informāciju par mežaudzes vecuma grupu kā klases vērtības otro
+    ciparu.
+
+4.  Savienojiet pirmajā un trešajā punktos izveidotos slāņus, tā, lai
+    mazāka skaitliskā vērtība nozīmē augstāku prioritāti/svaru/dominanci
+    rastra šūnas vērtības piešķiršanai.
+
+5.  Cik šūnās ir gan mežaudžu, gan lauku informācija?
+
+6.  Cik šūnas atrodas Latvijas sauszemes teritorijā, bet nav raksturotas
+    šī uzdevuma iepriekšējos punktos?
 
 ## Padomi
 
-Skatīt pamata zarā
+Tiks pievienoti pēc jautājumu saņemšanas.
