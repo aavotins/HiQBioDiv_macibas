@@ -1,6 +1,6 @@
 ---
 title: "02uzd_Zuperka"
-output: github_document
+output: rmarkdown::github_document
 ---
 
 ```{r setup, include=FALSE}
