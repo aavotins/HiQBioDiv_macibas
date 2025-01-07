@@ -1,0 +1,208 @@
+---
+title: "Uzd02_Straksa.Rmd"
+author: "Ance Strakša"
+date: "2025-01-07"
+output: html_document
+---
+
+
+## Iepazīstieties ar Valsts meža dienesta uzturēto Meža Valsts reģistru (vispārīgs apraksts, datubāzes struktūra, atvērtie dati). No atvērto datu portāla lejupielādējiet Centra virsmežniecības datus.Izmantojot 2651. nodaļas datus (nodala2651), salīdziniet ESRI shapefile, GeoPackage un geoparquet (ja vēlaties arī ESRI File Geodatabase, kuras uzrakstīšanai var nākties izmantot citu programmu) failu: aizņemto diska vietu; ielasīšanas ātrumu vismaz 10 ielasīšanas izmēģinājumos.
+
+Bibliotēku ielāde
+
+```{r}
+library(sf)
+library(curl)
+library(dplyr) 
+library(sfarrow)
+library(microbenchmark)
+
+```
+
+Direkotrija norāde
+
+```{r}
+setwd("C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/Centra_Virsmezniecibas_Dati")
+
+getwd
+
+list.files()
+
+shapefile_path <- "C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/Centra_Virsmezniecibas_Dati/nodala2651.shp"
+
+```
+
+Pārveido failu .gpkg formātā
+
+```{r}
+gdf <- st_read(shapefile_path)
+
+gpkg_path <- "C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/nodala2651.gpkg"
+
+st_write(gdf, gpkg_path)
+```
+
+Pārveido failu geoparquet formātā
+
+```{r}
+gpkg_path <- "C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/nodala2651.gpkg"
+
+geoparquet_path <- "C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/nodala2651.parquet"
+
+gdf <- st_read(gpkg_path)
+
+st_write_parquet(gdf, geoparquet_path)
+
+```
+
+Salīdzina aizņemto diska vietu
+
+```{r}
+shapefile_path <- "C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/Centra_Virsmezniecibas_Dati/nodala2651.shp"
+
+gpkg_path <- "C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/nodala2651.gpkg"
+
+parquet_path <- "C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/nodala2651.parquet"
+
+file_sizes <- data.frame(
+      Format = c("Shapefile", "GeoPackage", "GeoParquet"),
+      Size_MB = c(
+          file.info(shapefile_path)$size / 1e6,
+          file.info(gpkg_path)$size / 1e6,
+          file.info(parquet_path)$size / 1e6
+      )
+  )
+print(file_sizes)
+
+```
+
+Iegūst rezultātu: 
+
+Shapefile 27.09240 MB   GeoPackage 57.79456 MB   GeoParquet 22.10898 MB
+
+Salīdzina ielasīšanas ātrumu vismaz 10 ielasīšanas izmēģinājumos. 
+
+```{r}
+
+benchmark <- microbenchmark(
+  shapefile = st_read(shapefile_path, quiet = TRUE),
+  geopackage = st_read(gpkg_path, quiet = TRUE),
+  geoparquet = st_read_parquet(parquet_path),
+  times = 10
+)
+print(benchmark)
+
+```
+
+Formāts	           Minimālais laiks (ms)     	Maksimālais laiks (ms)	    Vidējais laiks (ms)
+Shapefile	              5981.56	                    7385.49	                  7009.88
+GeoPackage	            3888.61	                    5122.42	                  4343.57
+GeoParquet	             934.26	                    1448.88	                  1161.60
+
+Tiek iegūts rezultāts, ka: 
+Shapefile (shp) formāta saglabāšana ir vislēnākā, vidēji aizņemot ~7009 ms.
+GeoPackage (gpkg) ir ātrāks par shapefile, bet lēnāks nekā GeoParquet, ar vidējo laiku ~4343 ms.
+GeoParquet ir visātrākais, vidēji aizņemot tikai ~ 1161 ms, kas norāda uz augstāku efektivitāti datu apstrādē.
+
+## Apvienojiet visu Centra virzmežniecību nodaļu datus vienā slānī. Nodrošiniet, ka visas ģeometrijas ir MULTIPOLYGON, slānis nesatur tukšas vai nekorektas (invalid) ģeometrijas.
+
+```{r}
+
+setwd("C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD")
+
+files <- list.files("Centra_Virsmezniecibas_Dati", pattern = "\\.shp$", full.names = TRUE)
+
+all_layers <- lapply(files, st_read)
+
+merged_layer <- do.call(rbind, all_layers)
+
+merged_layer <- merged_layer %>%
+      st_cast("MULTIPOLYGON")
+a?
+merged_layer <- merged_layer %>%
+      filter(st_is_valid(geometry)) %>%
+      filter(!is.na(geometry))
+
+st_write(merged_layer, "merged_layer_fixed.gpkg", delete_dsn = TRUE)
+```
+
+Apvienotajā slānī aprēķiniet priežu (kumulatīvo dažādām sugām) pirmā stāva šķērslaukumu īpatsvaru, kuru saglabājiet laukā prop_priedes.
+
+Skaidrojums - tiek atlasīti visi tie S10, S11, S12, S13 un S14 (jeb sugu raksturojošie lauki) kuriem attiecīgajā atribūtu laukā ir cipars 1, 14, 22 (apzīmē priedi, citas priedes vai ciedru pridi). Šiem laukiem atbilstošās G jeb šķērslaukuma vērtības tiek sasummētas.
+
+```{r}
+
+geopaka = st_read("nodala2651.gpkg", quiet = TRUE)
+
+jauna_geopaka = geopaka %>% mutate("prop_priede" = ifelse (s10 == 1 | s10 == 14 | s10 == 22, g10, 0) + ifelse(s11 == 1 | s11 == 14 | s11 == 22, g11, 0) +  ifelse(s12 == 1 | s12 == 14 | s12 == 22, g12, 0) + ifelse (s13 == 1 | s13 == 14 | s13 == 22, g13, 0) + ifelse (s14 == 1 | s14 == 14 | s14 == 22, g14, 0))
+
+jauna_geopaka
+
+st_write(jauna_geopaka, "Centra_virsmeznieciba.gpkg")
+
+jauna_geopaka = jauna_geopaka %>% mutate ("Priezu_mezi" = ifelse("prop_priede", 1,0))
+
+```
+
+## Laukā PriezuMezi ar vērtību “1” atzīmējiet tās mežaudzes, kurās priedes šķērslaukuma īpatsvars pirmajā stāvā ir vismaz 75% un ar “0” tās mežaudzes, kurās īpatsvars ir mazāks, pārējos ierakstus atstājot bez vērtībām. Kāds ir priežu mežaudžu īpatsvars no visām mežaudzēm?
+
+```{r}
+jauna_geopaka = jauna_geopaka %>% mutate ("Priezu_mezi" = ifelse(prop_priede > 0 & prop_priede/ (g10 + g11 + g12 + g13 +g14) >= 0.75, 1, 0))
+
+jauna_geopaka 
+
+st_write(jauna_geopaka, "jauna_geopaka.gpkg")
+
+```
+
+Tiek iegūts rezultāts, ka 14,6% no mežiem ir priežu meži jeb no 91 369 vienībām 12 339 atbilst šim nosacījumam.
+
+##Apvienotajā slānī, izmantojot informāciju par pirmā stāva koku sugām un to šķērslaukumiem, veiciet mežaudžu klasifikāciju skujkoku, šaurlapju, platlapju un jauktu koku mežos. Paskaidrojiet izmantoto pieeju un izvēlētos robežlielumus. Kāds ir katra veida mežu īpatsvars no visiem ierakstiem? 
+
+Tālāk tiek darīts tas pats kas iepriekšējā solī ar priedēm, tikai šoreiz tiek sasummēts šķērslaukums skujkokiem, šaurlapjiem un platlapjiem. 
+
+```{r}
+
+skujkoki = c(1,3,13,14,15,22,23,28)
+jauna_geopaka = jauna_geopaka %>% mutate ("skujkoku_ipatsvars" = ifelse(s10 %in% skujkoki, g10,0) + ifelse(s11 %in% skujkoki, g11,0) + ifelse(s12 %in% skujkoki, g12,0) + ifelse(s13 %in% skujkoki, g13,0) + ifelse(s14 %in% skujkoki, g14,0))
+
+saurlapji = c(4,6,8,9,21,68,19,20) 
+jauna_geopaka = jauna_geopaka %>% mutate ("saurlapju_ipatsvars" = ifelse(s10 %in% saurlapji, g10, 0)+ ifelse(s11 %in% saurlapji, g11, 0) + ifelse(s12 %in% saurlapji, g12, 0) + ifelse(s13 %in% saurlapji, g13, 0) + ifelse(s14 %in% saurlapji, g14, 0))
+
+platlapji = c(10,11,12,16,17,18,19,20,24,25,26,27,29,32,35,50,61,62,63,64,65,66,67,69)
+jauna_geopaka = jauna_geopaka %>% mutate ("platlapju_ipatsvars" = ifelse(s10 %in% platlapji, g10, 0)+ ifelse(s11 %in% platlapji, g11, 0) + ifelse(s12 %in% platlapji, g12, 0) + ifelse(s13 %in% platlapji, g13, 0) + ifelse(s14 %in% platlapji, g14, 0))
+
+```
+
+Ja šie koki sastāda vairāk nekā 75% no meža platības, tad tiem tiek piešķirta attiecīgā klase. Pārējiem tiek piešķirta jauktu koku klase. Tā kā ir meži, kur sugu šķērslaukums rezultējas ar 0, tiem tiek norādīts "Nav koku šķērslaukuma". 
+
+```{r}
+jauna_geopaka = jauna_geopaka %>% mutate ("meza_tips" = case_when(
+  
+skujkoku_ipatsvars / (g10 + g11 + g12 + g13 +g14) >= 0.75 ~ "skujkoku",
+
+saurlapju_ipatsvars / (g10 + g11 + g12 + g13 +g14) >= 0.75 ~ "saurlapju",
+
+platlapju_ipatsvars /(g10 + g11 + g12 + g13 +g14) >= 0.75 ~ "platlapju",
+
+g10 + g11 + g12 + g13 +g14 == 0 ~ "Nav koku šķērslaukuma",
+
+TRUE ~ "jauktu"))
+
+```
+
+Iegūst rezultātu, ka:
+
+Skujkoku meži ir 21 874 (23,9 %)
+
+Šaurlpaju: 29 981 (32,8%)
+
+Platlapju: 659 (0,7 %)
+
+Jaukti: 8 383 (9,1 %)
+
+Nav koku šķērslaukuma: 30 472 (33,3 %)
+
+
+
+
