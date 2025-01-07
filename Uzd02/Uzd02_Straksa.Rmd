@@ -19,7 +19,7 @@ library(microbenchmark)
 
 ```
 
-Direkotrija norāde
+Direktorija norāde
 
 ```{r}
 setwd("C:/Users/Ance/OneDrive - University of Latvia/Documents/HiQBioDiv_macibas/2_UZD/Centra_Virsmezniecibas_Dati")
@@ -128,7 +128,7 @@ st_write(merged_layer, "merged_layer_fixed.gpkg", delete_dsn = TRUE)
 
 Apvienotajā slānī aprēķiniet priežu (kumulatīvo dažādām sugām) pirmā stāva šķērslaukumu īpatsvaru, kuru saglabājiet laukā prop_priedes.
 
-Skaidrojums - tiek atlasīti visi tie S10, S11, S12, S13 un S14 (jeb sugu raksturojošie lauki) kuriem attiecīgajā atribūtu laukā ir cipars 1, 14, 22 (apzīmē priedi, citas priedes vai ciedru pridi). Šiem laukiem atbilstošās G jeb šķērslaukuma vērtības tiek sasummētas.
+Skaidrojums - tiek atlasīti visi tie S10, S11, S12, S13 un S14 (jeb sugu raksturojošie lauki) kuriem attiecīgajā atribūtu laukā ir cipars 1, 14, 22 (apzīmē priedi, citas priedes vai ciedru priedi). Šiem laukiem atbilstošie G lauki jeb šķērslaukuma vērtības tiek sasummētas.
 
 ```{r}
 
@@ -195,7 +195,7 @@ Iegūst rezultātu, ka:
 
 Skujkoku meži ir 21 874 (23,9 %)
 
-Šaurlpaju: 29 981 (32,8%)
+Šaurlapju: 29 981 (32,8%)
 
 Platlapju: 659 (0,7 %)
 
