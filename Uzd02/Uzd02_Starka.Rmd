@@ -1,0 +1,301 @@
+---
+title: "Uzd02_Starka"
+author: "Rūta Starka"
+date: "2025-01-01"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Sagatavošanās
+
+Lejupielādēju un atpakoju Meža valsts reģistra Centra virsmežniecības datus. 
+P.S.
+Netiku galā ar atzipošanas kļūdu "Error: archive_extract.cpp:166 archive_read_next_header(): unknown libarchive error". Folderī izveidojas mape ar norādīto nosaukumu, bet tajā netiek ievietoti faili no arhīva. Kādu laiku ar to noņēmos, bet pārāk ilgi, tāpēc nokāru galvu, izdarīju atzipošanu manuāli folderī un gāju tālāk. Atstāju šeit kodu, cerībā uz padomu.
+
+```{r}
+setwd("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02")
+download.file(url = "https://data.gov.lv/dati/lv/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92/resource/392dfb67-eeeb-43c2-b082-35f9cf986128/download/centra.7z", destfile ="VMD_MVR_centra.zip")
+
+library(archive)
+archive_extract("VMD_MVR_centra.zip", dir = "VMD_MVR_centra")
+
+list.files("VMD_MVR_centra")
+```
+
+#1. uzdevums
+Uzdevuma pirmās daļas - datu apjoma salīdzināšanai nepieciešams atlasīt 2651. nodaļas datus. 
+
+```{r, echo=FALSE}
+install.packages("sf")
+library(sf)
+ERSI_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2651")
+```
+
+Tagad no šī sheipfaila jāizveido Geopackage un geoparquet formāti.
+Tam nepieciešamas "sfarrow" pakotnes funkcijas.
+
+```{r}
+install.packages("sfarrow", dependencies=TRUE)
+library(sfarrow)
+
+st_write_parquet(ERSI_shp, dsn="nodala2651.parquet")
+st_write(ERSI_shp, dsn="nodala2651.gpkg")
+```
+
+##1.1. aizņemtā diska vieta
+Tagad varam salīdzināt šo trīs formātu izmērus.
+Tā kā funkcija kā rezultātu dod izmēru bitos, papildus izveidoju kolonnu "MB", kur aprēķināts izmērs megabitos.
+Secinu, ka vismazāk vietas aizņem geoparquet formāts (22.1 MB).
+Pēc rezultātu apskates ar funkciju rm() noņemu objektu "izmeri" no R vides.
+
+```{r}
+izmeri=data.frame(biti=file.size("nodala2651.parquet","nodala2651.gpkg","D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2651.shp"),
+            row.names=c("geoparquet","GeoPackage","Shape"))
+izmeri$MB=izmeri$biti/1000000
+print(izmeri)
+rm(izmeri)
+
+```
+
+##1.2. ielasīšanas ātrums
+Tagad jāsalīdzina šo trīs formātu ielasīšanas ātrums. 
+Lai uzzinātu ekspresijas ātrumus, var izmantot "mikrobenchmark" pakotnes funkciju mikrobenchmark().Rezultātu tālākai salīdzināšanai, tos sākotnēji veidoju kā atsevišķus objektus, un pēc tam apkopoju datu tabulā "atrumi".
+Ņemot vērā, ka funkcijas rezultāts ir ielasīšanas laiks nanosekundēs, pārrēķinu to uz sekundēm un ievietoju rezultātu jaunā kolonnā, uzskatāmākai tālākai salīdzināšanai.
+
+```{r include=FALSE}
+install.packages("microbenchmark")
+library(microbenchmark)
+par=data.frame(microbenchmark(st_read_parquet("nodala2651.parquet"),times=10))
+gpk=data.frame(microbenchmark(read_sf("nodala2651.gpkg"),times=10))
+shp=data.frame(microbenchmark(st_read(dsn="VMD_MVR_centra",layer="nodala2651"),times=10))
+atrumi=rbind.data.frame(par,gpk,shp)
+rm(gpk,par,shp)
+atrumi$sek=atrumi$time/1e+09
+
+```
+
+Lai ekspresijas ātrumus salīdzinātu, pēc priekšnosacījumu pārbaudes veicu šo trīs paraugkopu salīdzināšanu ar parametriskām metodēm. Secinu, ka visu šo trīs datu formātu ielasīšanas ātrumi savstarpēji būtiski atšķiras. Geoparquet formāts ielasās būtiski ātrāk.
+
+```{r}
+tapply(atrumi$sek, atrumi$expr,shapiro.test)
+s=aov(sek~expr, data=atrumi)
+summary(s)
+TukeyHSD(s)
+rm(s)
+```
+
+Vizuāls ielasīšanas ātruma salīdzinājums:
+```{r, echo=FALSE}
+library(ggplot2)
+ggplot(atrumi, aes(expr, sek)) + geom_boxplot()+ 
+      labs(x = "Formāts", y = "Ielasīšanas ātrums (sekundes)")+
+  scale_x_discrete(labels=c('Geoparquet', 'GeoPackage', 'Shape'))
+```
+Atbrīvojos no liekajiem objektiem R vidē:
+```{r}
+rm(atrumi,ERSI_shp)
+```
+
+#2. Centra virzmežniecību nodaļu datu apvienošana vienā slānī
+Ņemot vērā, ka geoparquet formāts aizņem vismazāk vietas uz diska, un ar to dabības ir veicamas ātrāk, turpmāk darbošos ar šo formātu. 
+Sākumā pārbaudu, cik dažādi nodaļu nosaukumi ir centra virsmežniecībā, atlasot failus ar .shp formātu. Noskaidroju, ka tādi ir pieci. Šo informāciju izmantoju, lai uzrakstītu kurus slāņus nepieciešams ielasīt. 
+##2.1. faila izveide
+Sākotnēji ielasu atsevišķus shape slāņus, tad apvienoju tos vienā shape "centrs_SHP" izmantojot (rbind).
+Tad, tāpat kā iepriekš, pārveidoju no shape uz geopackage formātu, saglabājot rezultātu "centrs_kopa.parquet" darba direktorijā.
+Atbrīvojos no liekajiem objektiem un vērtībām R vidē, un visbeidzot zem nosaukuma "centrs_kopa" ielasu jaunizveidoto apvienoto Centra virsmežniecības ģeosaini.
+```{r, warning=FALSE}
+list.files("VMD_MVR_centra",(pattern = "\\.shp$"))
+n2651_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2651")
+n2652_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2652")
+n2653_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2653")
+n2654_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2654")
+n2655_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2655")
+
+centrs_SHP=rbind(n2651_shp,n2652_shp,n2653_shp,n2654_shp,n2655_shp)
+st_write_parquet(centrs_SHP, dsn="centrs_kopa.parquet")
+rm(n2651_shp,n2652_shp,n2653_shp,n2654_shp,n2655_shp,centrs_SHP,pattern)
+centrs_kopa=st_read_parquet("centrs_kopa.parquet")
+
+```
+
+##2.2. faila pārbaude
+Tālāk jāpārliecinās, ka visas ģeometrijas ir MULTIPOLYGON, slānis nesatur tukšas vai nekorektas (invalid) ģeometrijas. To var apskatīt ar visparastāko datu struktūras pārbaudes funkciju str(). 
+Tās pēdējais rezultāts ir $geometry, kur redzams, ka visi 505660 novērojumi (rindas) ir multipoligon.
+```{r}
+str(centrs_kopa)
+```
+
+Lai pārbaudītu, vai slānis nesatur tukšas vērtības, izveidoju tabulu "iztrukumi", kur šūnas saturs aizvietots ar TRUE, ja tā ir tukša, un FALSE, ja tajā ir kāda vērtība. Tad, izmantojot "tidyverse" pakotni atlasu, kurās rindās no visām kolonnām ir iztrūkstošas vērtības. Secinu, ka nevienā no rindām nevienā kolonnā nav iztrūkstošu vērtību. Aizvācu izveidoto tabulu "iztrukumi" no R vides. 
+
+```{r}
+iztrukumi=as.data.frame(is.na(centrs_kopa))
+library(tidyverse)
+iztrukumi%>% filter_all(any_vars(. %in% c('TRUE')))
+rm(iztrukumi)
+```
+
+Tagad jāparbauda, vai slānis satur tikai korektas ģeometrijas. 
+Lai noskaidrotu nekorektas ģeometrijas iemeslus, funkcijai st_is_valid() jāpievieno reason=TRUE. 
+Ar sort(unique())) atlasu unikālās vērtības starp validitātes iemesliem. Apskatu visus rezultātus.
+Redzu, ka 274 poligoniem ir "Ring Self-intersection", kas nozīmē, ka tie pārklājas paši ar sevi, jeb to forma satur malu savstarpēju krustošanos (piemēram, caurumus vai viena poligona malas saskaršanos).
+
+```{r}
+v=data.frame(geom_val=st_is_valid(centrs_kopa$geometry, reason=TRUE))
+sort(unique(v$geom_val))
+
+```
+
+Šo problēmu tagad ir jārisina. Ar to jābūt uzmanīgam, jo atkarībā no risinājuma var potenciāli mainīties tālākie rezultāti. Ir divi varianti, ko darīt ar nekorektajā, ģeometrijām - tās izdzēst (zaudēsim datus, tāpēc to neizvēlos) vai tās labot ar funkciju st_make valid().Šajā funkcijā ir divi varianti, ko norādīt pie argumenta geos_method=, kas nosaka labošanas metodi- "valid linework", kas cik saprotu izveido līnijas starp poligona robežas krustpunktiem, un tad ģenerē korektus poligonus no šīm līnijām, vai arī "valid structure", kas paredz, ka poligonu forma (robežas un "caurumi") ir pareizi kategorizētas, un norāda, ka tās ir pareizas. Pieņemu lēmumu, ka otrs variants ir labāks (bet neesmu pārliecināta, tāpēc izmēģināju abus variantus. Pirmais atrisināja problēmu, otrais radīja sešas tukšas ģeometrijas).
+Izmēģinu abus varian
+
+Tad atkārtoju pārbaudi un secinu, ka visas ģeometrijas ir korektas, papildus, nav tukšu lauku. Šķiet, ka viss ir pareizi, tāpēc atbrīvojos no liekajiem objektiem, un paturu tikai jaunizveidoto "centrs_kopa2", kas satur tikai korektas ģeometrijas.
+
+```{r}
+centrs_kopa2=st_make_valid(centrs_kopa, geos_method = "valid_structure")
+v2=data.frame(geom_val=st_is_valid(centrs_kopa2$geometry, reason=TRUE))
+sort(unique(v2$geom_val))
+
+iztrukumi2=as.data.frame(is.na(centrs_kopa2))
+iztrukumi2%>% filter_all(any_vars(. %in% c('TRUE')))
+rm(v, v2, iztrukumi2, centrs_kopa)
+```
+
+#3. Priežu īpatsvari
+Tagad jāaprēķina pirmā stāva šķērslaukumu īpatsvaru, ko veido priedes (jāizveido jauns lauks "prop_priedes"). 
+
+Jārēķinās ar datu bāzes struktūru. Pirmkārt, priedes pirmajā stāvā gan var būt kā pirmā (s10), gan kā otrā(s11), trešā(s12), ceturtā(s13) vai piektā suga(s14). Otrkārt, datu bāzē ir trīs priežu sugas - parastā priede (kods 1), citas priedes (kods 14) un ciedru priede (kods 22). Attiecīgi laukiem s10:s14 jāsatur kodi 1, 14 vai 22, kas apzīmē priedes. 
+Pirmā stāva sugu šķērslaukumi (m2/ha) atrodas  attiecīgi laukos g10-g14.
+
+Var izmantot ifelse() funkciju kombināciju, lai saskaitītu šķērslakumu tikai tām rindām, kas satur vērtību 1,14 vai 22 attiecīgi laukos s10-s14. Saskaitot jāuzmanās, lai netiktu saskaitīti visu sugu šķērslaukumi, gadījumos, ja piemēram tikai pirmā stāva pirmā suga ir priede, bet pārējās pirmā stāva sugas ir citas. Tāpēc izvēlos garāku, bet manuprāt drošāku risinājumu, saskaitot šos šķērslaukumus jaunā laukā "skersl_priedes1st". 
+
+```{r}
+centrs_kopa2$skersl_priedes1st=ifelse(centrs_kopa2$s10=="1"|centrs_kopa2$s10=="14"|centrs_kopa2$s10=="22",centrs_kopa2$g10,0)+
++                                    ifelse(centrs_kopa2$s11=="1"|centrs_kopa2$s11=="14"|centrs_kopa2$s11=="22",centrs_kopa2$g11,0)+
++                                    ifelse(centrs_kopa2$s12=="1"|centrs_kopa2$s12=="14"|centrs_kopa2$s12=="22",centrs_kopa2$g12,0)+
++                                    ifelse(centrs_kopa2$s13=="1"|centrs_kopa2$s13=="14"|centrs_kopa2$s13=="22",centrs_kopa2$g13,0)+
++                                    ifelse(centrs_kopa2$s14=="1"|centrs_kopa2$s14=="14"|centrs_kopa2$s14=="22",centrs_kopa2$g14,0)
+```
+
+Tālāk, lai iegūtu proporciju, jau aprēķināto priežu kumulatīvo šķērslaukumu jādala ar visu sugu šķērslaukumu. Ņemot vērā, ka atsevišķām mežaudžu kategorijām kopējais sķērslaukums ir 0 (piemēram, kailcirtēm), tad aprēķinot proporciju šajos gadījumos sanāk saucējā 0, kas atgriež "NaN" (not a number). Tas jāņem vērā tālākos aprēķinos.
+Starpaprēķinu kolonnas izņemu no tabulas. 
+
+```{r}
+centrs_kopa2$skersl_visi=centrs_kopa2$g10+centrs_kopa2$g11+centrs_kopa2$g12+centrs_kopa2$g13+centrs_kopa2$g14
+
+centrs_kopa2$prop_priedes=centrs_kopa2$skersl_priedes1st/centrs_kopa2$skersl_visi
+centrs_kopa2$skersl_priedes1st=NULL
+
+```
+
+Tālāk veidoju jaunu lauku "PriezuMezi", kurā ar vērtību "1" atzīmētas tās mežaudzes, kurās priedes šķērslaukuma īpatsvars pirmajā stāvā ir vismaz 75% un ar "0" tās mežaudzes, kurās īpatsvars ir mazāks (bet tomēr ne 0), bet pārējām mežaudzēm, kurās priedes vispār neveido nekādu šķērslaukumu (faktiski 0 vai NaN), šajā laukā jāatstāj tukšumi (NA). 
+
+```{r}
+centrs_kopa2$PriezuMezi=ifelse(centrs_kopa2$prop_priedes>=0.75,1,ifelse(centrs_kopa2$prop_priedes>0,0,NA))
+```
+
+Tālāk jānoskaidro, kāds ir priežu mežaudžu īpatsvars no visām mežaudzēm. Ja pieņem, ka priežu mežaudzes ir tās, kurās priedes veido vismaz 75% no kopējā šķērslaukuma, tad to noskaidrot var vienkārši saskaitot cik mežaudzēm no kopējām 505660 mežaudzēm laukā "PriezuMezi" ir vērtība "1" (ignorējot tukšās šūnas, tāpēc arguments na.rm=TRUE), un izdalot to ar kopējo mežaudžu skaitu, kas atbilst rindu skaitam matricā. Lai iegūtu %, pareizinu iegūto proporciju ar 100. Noapaļoju rezultātu ar diviem cipariem aiz komata.
+Secinu, ka Centra virsmežniecībā 17.83% ir priežu mežaudes.
+
+```{r}
+round(sum(centrs_kopa2$PriezuMezi,na.rm = TRUE)/nrow(centrs_kopa2)*100,2)
+```
+#4. Mežaudžu klasifikācija
+Lai sāktu mežu klasifikāciju, vispirms jānodefinē, kādi koki veido šos mežu veidus. 
+Balstoties uz Latvijas biotopu klasifikatoru (Kabucis 2001), mežu biotopus var izdalīt pēc dominējošās/-ām (1. stāva) koku sugas/-ām. Pastāv dažādas dominances skalas. Nesenā pētījumā par dominējošām koku sugām uzskatītas tādas, kuru šķērslaukums veido vismaz 10% no teritorijas kopējā šķērslaukuma (https://doi.org/10.1111/geb.13889), bet šāds slieksnis nešķiet piemērots šim kontekstam. 
+Par dominēšanas slieksni izmantošu 75% (augšējo kvartilli), kā tas jau iepriekš izmantots, un ir saskaņā ar daļu no eksistējošās dominances skalām. Ja pirmajā stāvā nav vienas dominējošas sugas, un vienlaicīgi sastopamas gan skujkoku un platlapju, vai skujkoku un šaurlapju, vai visas trīs kategorijas kopā, tad šādu mežu var klasificēt kā jauktu koku mežu
+
+Pēdējais jautājums, kas jānoskaidro pirms klasificēšanas sākšanas, ir kuras koku sugas pieder pie šaurlapjiem, kuras - pie platlapjiem, bet kuras - pie skujkokiem. Ja ar pēdējo kategoriju problēmu nav, tad informāciju par to, kādai kategorijai pieder lapukoki ir problemātiskāk. Vispār pieņemts, ka bērzi, apses un alkšņi ir šaurlapji, bet dažādos informācijas avotos nemaz neizmanto grupēšanu šaurlapjos, un piemēram, purva bērzu iedala kā platlapi (https://www.ucc.ie/en/tree-explorers/trees/a-z/betulapubescens/ vai https://landscapeplants.oregonstate.edu/plants/betula-pubescens). 
+
+Sākumā, balstoties uz sugu aprakstiem , kādas koku sugas vispār sastopamas Centra virsmežniecības mežos. Pēc apskatas vērtības izņemu no R vides.
+
+```{r}
+sugas1st=unique(c(unique(centrs_kopa2$s10),unique(centrs_kopa2$s11),unique(centrs_kopa2$s12),unique(centrs_kopa2$s13),unique(centrs_kopa2$s14)))
+sort(as.numeric(sugas1st))
+rm(sugas1st)
+```
+Tā kā neatrodu vienu informācijas avotu, kur būtu klasificētas šādās kategorijās visas meža valsts reģistrā iekļautās un šajos datos sastopamās 1. stāva koku sugas, tad šajā uzdevumā 1. stāvā sastopamās koku sugas pa kategorijām iedalīju šādi:
+
+skujkoki (koki ar zvīņveida lapām vai skujām)- priedes (1, 14, 22), egles (3, 13, 15, 23), īve (29); 
+šaurlapji (ātri augoši koki ar šaurām lapām)- bērzi (4), alkšņi (6,9), apses (8,68), vītoli (19,20,21);
+platlapji (koki ar platām lapām)- ozoli (10, 61), oši (11, 64), kļavas (24, 63), liepas (12, 62), gobas un vīksnas (16, 65), skabārži (17, 18), zirgkastaņi (67), riekstkoki (66), papildus šeit kategorizēju ķiršus, mežābeles un bumbieres (25, 26, 27), kā arī pīlādžus, ievas un akācijas (32,35,50) (skat. komentāru zemāk);
+jauktu koku meži - meži, kuros 1. stāvā dominē gan skujkoku, gan lapkoku (šaurlapju vai platlapju) sugas.
+
+Diskutabls ir ābeļu, ķiršu, bumbieru, pīlādžu, ievu un akāciju iedalījums. Šoreiz iedalīju pie platlapjiem, bet pēc būtības grūti iztēloties šos mežus, kuros 1. stāvā ir šīs sugas. Tas varētu būt kādas jaunaudzes vai parki, bet katrā ziņā noteikti tās nesastāda lielu īpatsvaru. Būtībā šāds iedalījums platlapju un šaurlapju mežos vairāk aktuāls ir meža augsšanas apstākļu tipu kontekstā, atkarībā no augsnes auglības un mitruma. Tāpēc tā vienkārši pēc sugām kategorizēt var, ja norāda kuras sugas kur ieliek, bet tikpat labi, varētu ņemt vērā vairākus faktorus, lai šīs kategorijas būtu precīzākas un labāk izmantojamas.
+
+Tehniskam izpildījumam, sākumā izveidoju sarakstus ar koku sugām, atkarībā no to koda datubāzē.
+Tad, ieviesu trīs jaunus laukus, kur aprēķināts šo mežaudžu kategoriju veidojošo koku sugu kopējais šķerslaukums 1. stāvā. 
+ 
+```{r}
+skujkoki = c(1, 3, 13, 14, 15, 22, 23, 28, 29)
+saurlapji =c(4, 6, 8, 9, 19, 20, 21, 68)
+platlapji = c(10, 11, 12, 16, 17, 18, 24, 25, 26, 27, 32, 35, 50, 61, 63, 64, 65, 66, 67)
+
+centrs_kopa2$skersl_skujkoki = 
+  ifelse(centrs_kopa2$s10 %in% skujkoki, centrs_kopa2$g10,0) +
+  ifelse(centrs_kopa2$s11 %in% skujkoki, centrs_kopa2$g11,0) + 
+  ifelse(centrs_kopa2$s12 %in% skujkoki, centrs_kopa2$g12,0) + 
+  ifelse(centrs_kopa2$s13 %in% skujkoki, centrs_kopa2$g13,0) + 
+  ifelse(centrs_kopa2$s14 %in% skujkoki, centrs_kopa2$g14,0)
+
+centrs_kopa2$skersl_saurlapji = 
+  ifelse(centrs_kopa2$s10 %in% saurlapji, centrs_kopa2$g10,0) +
+  ifelse(centrs_kopa2$s11 %in% saurlapji, centrs_kopa2$g11,0) + 
+  ifelse(centrs_kopa2$s12 %in% saurlapji, centrs_kopa2$g12,0) + 
+  ifelse(centrs_kopa2$s13 %in% saurlapji, centrs_kopa2$g13,0) + 
+  ifelse(centrs_kopa2$s14 %in% saurlapji, centrs_kopa2$g14,0)
+
+centrs_kopa2$skersl_platlapji = 
+  ifelse(centrs_kopa2$s10 %in% platlapji, centrs_kopa2$g10,0) +
+  ifelse(centrs_kopa2$s11 %in% platlapji, centrs_kopa2$g11,0) + 
+  ifelse(centrs_kopa2$s12 %in% platlapji, centrs_kopa2$g12,0) + 
+  ifelse(centrs_kopa2$s13 %in% platlapji, centrs_kopa2$g13,0) + 
+  ifelse(centrs_kopa2$s14 %in% platlapji, centrs_kopa2$g14,0)
+
+```
+
+Tālāk jānosaka proporcija (jeb jānoskaidro dominance). 
+To var noskaidrot, dalot iegūto šķērslaukumu ar kopējo, kas jau iepriekš aprēķināts laukā "skersl_visi".
+Šeit atkal jārēķinās, ka atsevišķām mežaudžu kategorijām kopējais sķērslaukums ir 0 (piemēram, kailcirtēm), tad aprēķinot proporciju šajos gadījumos sanāk saucējā 0, kas atgriež "NaN" (not a number). Šīs mežaudzes nevar klasificēt tālā pēc būtības. 
+Pārbaudot ar str() šādas situācijas ir visās trīs izveidotajās mežaudžu grupās.
+
+```{r}
+centrs_kopa2$prop_skujkoki=centrs_kopa2$skersl_skujkoki/centrs_kopa2$skersl_visi
+centrs_kopa2$prop_saurlapji=centrs_kopa2$skersl_saurlapji/centrs_kopa2$skersl_visi
+centrs_kopa2$prop_platlapji=centrs_kopa2$skersl_platlapji/centrs_kopa2$skersl_visi
+
+str(centrs_kopa2$prop_skujkoki)
+str(centrs_kopa2$prop_saurlapji)
+str(centrs_kopa2$prop_platlapji)
+
+```
+
+Tagad beidzot var veikt klasifikāciju. Tam ieviesīšu jaunu lauku "Klasifikacija".
+Ja mežaudzē dominē kāda no trijām sugu grupām (īpatsvars >=0.75), tad tā tiks attiecīgi klasificēta. Ja tajā nedominē neviena no šīm grupām, tad tā tiks klasificēta kā "Jauktu koku".
+
+
+```{r}
+centrs_kopa2$Klasifikacija=
+  ifelse(centrs_kopa2$prop_skujkoki>=0.75,"Skujkoku",
+  ifelse(centrs_kopa2$prop_saurlapji>=0.75,"Šaurlapju",
+  ifelse(centrs_kopa2$prop_platlapji>=0.75,"Platlapju","Jauktu koku")))
+```
+
+Lai atbildētu uz jautājumu, Kāds ir katra veida mežu īpatsvars no visiem ierakstiem, sākumā pārbaudu, vai klasifikācija ir izvevusies, atlasot unikālās vērtības laukā "Klasifikacija". Redzu, ka pastāv mežaudzes, kas nav klasificētas. Augstāk jau paskaidroju, ka tas ir iespējams atsevišķos gadījumos. Gribētu zināt cik tādu gadījumu ir, tāpēc tabulas veidā apskatu mežaudžu skaitu katrā klasē. Secinu, ka neklasificētu mežaudžu ir ļoti daudz.
+
+```{r}
+unique(centrs_kopa2$Klasifikacija)
+
+table(centrs_kopa2$Klasifikacija, useNA = 'always')
+```
+
+Noslēgumā atbildot uz jautājumu, mežaudžu īpatsvari (%) katrā klasē ir sekojoši:
+```{r}
+data.frame(Klase=c('Skujkoku', 'Šaurlapju', 'Platlapju', 'Jauktu koku',"Bez kategorijas"),
+          Īpatsvars_proc=                    c(round(length(which(centrs_kopa2$Klasifikacija=="Skujkoku"))/nrow(centrs_kopa2)*100,2),                                round(length(which(centrs_kopa2$Klasifikacija=="Šaurlapju"))/nrow(centrs_kopa2)*100,2),                    round(length(which(centrs_kopa2$Klasifikacija=="Platlapju"))/nrow(centrs_kopa2)*100,2),
+            round(length(which(centrs_kopa2$Klasifikacija=="Jauktu koku"))/nrow(centrs_kopa2)*100,2),                  round(length(which(is.na(centrs_kopa2$Klasifikacija)))/nrow(centrs_kopa2)*100,2)))
+                     
+```
+
