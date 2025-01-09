@@ -15,12 +15,12 @@ Lejupielādēju un atpakoju Meža valsts reģistra Centra virsmežniecības datu
 P.S.
 Netiku galā ar atzipošanas kļūdu "Error: archive_extract.cpp:166 archive_read_next_header(): unknown libarchive error". Folderī izveidojas mape ar norādīto nosaukumu, bet tajā netiek ievietoti faili no arhīva. Kādu laiku ar to noņēmos, bet pārāk ilgi, tāpēc nokāru galvu, izdarīju atzipošanu manuāli folderī un gāju tālāk. Atstāju šeit kodu, cerībā uz padomu.
 
-```{r}
+```{r Lejupielāde}
 setwd("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02")
 download.file(url = "https://data.gov.lv/dati/lv/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92/resource/392dfb67-eeeb-43c2-b082-35f9cf986128/download/centra.7z", destfile ="VMD_MVR_centra.zip")
 
 library(archive)
-archive_extract("VMD_MVR_centra.zip", dir = "VMD_MVR_centra")
+#archive_extract("VMD_MVR_centra.zip", dir = "VMD_MVR_centra")
 
 list.files("VMD_MVR_centra")
 ```
@@ -28,18 +28,16 @@ list.files("VMD_MVR_centra")
 #1. uzdevums
 Uzdevuma pirmās daļas - datu apjoma salīdzināšanai nepieciešams atlasīt 2651. nodaļas datus. 
 
-```{r, echo=FALSE}
-install.packages("sf")
-library(sf)
+```{r Shape ielasīšana, echo=TRUE, message=FALSE, warning=FALSE}
+library(sf) # install.packages("sf"), ja tā jau nav instalēta
 ERSI_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2651")
 ```
 
 Tagad no šī sheipfaila jāizveido Geopackage un geoparquet formāti.
 Tam nepieciešamas "sfarrow" pakotnes funkcijas.
 
-```{r}
-install.packages("sfarrow", dependencies=TRUE)
-library(sfarrow)
+```{r Formātu izveidošana}
+library(sfarrow) # install.packages("sfarrow", dependencies=TRUE), ja nepieciešams
 
 st_write_parquet(ERSI_shp, dsn="nodala2651.parquet")
 st_write(ERSI_shp, dsn="nodala2651.gpkg")
@@ -51,7 +49,7 @@ Tā kā funkcija kā rezultātu dod izmēru bitos, papildus izveidoju kolonnu "M
 Secinu, ka vismazāk vietas aizņem geoparquet formāts (22.1 MB).
 Pēc rezultātu apskates ar funkciju rm() noņemu objektu "izmeri" no R vides.
 
-```{r}
+```{r Aizņemtā diska vieta, echo=TRUE}
 izmeri=data.frame(biti=file.size("nodala2651.parquet","nodala2651.gpkg","D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2651.shp"),
             row.names=c("geoparquet","GeoPackage","Shape"))
 izmeri$MB=izmeri$biti/1000000
@@ -65,9 +63,8 @@ Tagad jāsalīdzina šo trīs formātu ielasīšanas ātrums.
 Lai uzzinātu ekspresijas ātrumus, var izmantot "mikrobenchmark" pakotnes funkciju mikrobenchmark().Rezultātu tālākai salīdzināšanai, tos sākotnēji veidoju kā atsevišķus objektus, un pēc tam apkopoju datu tabulā "atrumi".
 Ņemot vērā, ka funkcijas rezultāts ir ielasīšanas laiks nanosekundēs, pārrēķinu to uz sekundēm un ievietoju rezultātu jaunā kolonnā, uzskatāmākai tālākai salīdzināšanai.
 
-```{r include=FALSE}
-install.packages("microbenchmark")
-library(microbenchmark)
+```{r Ielasīšanas ātruma aprēķins, message=FALSE}
+library(microbenchmark)#install.packages("microbenchmark"), ja nepieciešams
 par=data.frame(microbenchmark(st_read_parquet("nodala2651.parquet"),times=10))
 gpk=data.frame(microbenchmark(read_sf("nodala2651.gpkg"),times=10))
 shp=data.frame(microbenchmark(st_read(dsn="VMD_MVR_centra",layer="nodala2651"),times=10))
@@ -79,7 +76,7 @@ atrumi$sek=atrumi$time/1e+09
 
 Lai ekspresijas ātrumus salīdzinātu, pēc priekšnosacījumu pārbaudes veicu šo trīs paraugkopu salīdzināšanu ar parametriskām metodēm. Secinu, ka visu šo trīs datu formātu ielasīšanas ātrumi savstarpēji būtiski atšķiras. Geoparquet formāts ielasās būtiski ātrāk.
 
-```{r}
+```{r Ielasīšanas ātruma salīdzināšana}
 tapply(atrumi$sek, atrumi$expr,shapiro.test)
 s=aov(sek~expr, data=atrumi)
 summary(s)
@@ -88,12 +85,13 @@ rm(s)
 ```
 
 Vizuāls ielasīšanas ātruma salīdzinājums:
-```{r, echo=FALSE}
-library(ggplot2)
+```{r Ielasīšanas ātrums vizuāli, echo=FALSE}
+library(ggplot2)# install.pasckages("qqplot2"), ja nepieciešams
 ggplot(atrumi, aes(expr, sek)) + geom_boxplot()+ 
       labs(x = "Formāts", y = "Ielasīšanas ātrums (sekundes)")+
   scale_x_discrete(labels=c('Geoparquet', 'GeoPackage', 'Shape'))
 ```
+
 Atbrīvojos no liekajiem objektiem R vidē:
 ```{r}
 rm(atrumi,ERSI_shp)
@@ -106,7 +104,7 @@ Sākumā pārbaudu, cik dažādi nodaļu nosaukumi ir centra virsmežniecībā, 
 Sākotnēji ielasu atsevišķus shape slāņus, tad apvienoju tos vienā shape "centrs_SHP" izmantojot (rbind).
 Tad, tāpat kā iepriekš, pārveidoju no shape uz geopackage formātu, saglabājot rezultātu "centrs_kopa.parquet" darba direktorijā.
 Atbrīvojos no liekajiem objektiem un vērtībām R vidē, un visbeidzot zem nosaukuma "centrs_kopa" ielasu jaunizveidoto apvienoto Centra virsmežniecības ģeosaini.
-```{r, warning=FALSE}
+```{r Slāņu apvienošana, message=FALSE, warning=FALSE}
 list.files("VMD_MVR_centra",(pattern = "\\.shp$"))
 n2651_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2651")
 n2652_shp = st_read(dsn="VMD_MVR_centra",layer="nodala2652")
@@ -124,13 +122,13 @@ centrs_kopa=st_read_parquet("centrs_kopa.parquet")
 ##2.2. faila pārbaude
 Tālāk jāpārliecinās, ka visas ģeometrijas ir MULTIPOLYGON, slānis nesatur tukšas vai nekorektas (invalid) ģeometrijas. To var apskatīt ar visparastāko datu struktūras pārbaudes funkciju str(). 
 Tās pēdējais rezultāts ir $geometry, kur redzams, ka visi 505660 novērojumi (rindas) ir multipoligon.
-```{r}
-str(centrs_kopa)
+```{r Apvienotā slāņa pārbaude 1}
+str(centrs_kopa$geometry)
 ```
 
 Lai pārbaudītu, vai slānis nesatur tukšas vērtības, izveidoju tabulu "iztrukumi", kur šūnas saturs aizvietots ar TRUE, ja tā ir tukša, un FALSE, ja tajā ir kāda vērtība. Tad, izmantojot "tidyverse" pakotni atlasu, kurās rindās no visām kolonnām ir iztrūkstošas vērtības. Secinu, ka nevienā no rindām nevienā kolonnā nav iztrūkstošu vērtību. Aizvācu izveidoto tabulu "iztrukumi" no R vides. 
 
-```{r}
+```{r Apvienotā slāņa pārbaude 2, message=FALSE, warning=FALSE}
 iztrukumi=as.data.frame(is.na(centrs_kopa))
 library(tidyverse)
 iztrukumi%>% filter_all(any_vars(. %in% c('TRUE')))
@@ -142,7 +140,7 @@ Lai noskaidrotu nekorektas ģeometrijas iemeslus, funkcijai st_is_valid() jāpie
 Ar sort(unique())) atlasu unikālās vērtības starp validitātes iemesliem. Apskatu visus rezultātus.
 Redzu, ka 274 poligoniem ir "Ring Self-intersection", kas nozīmē, ka tie pārklājas paši ar sevi, jeb to forma satur malu savstarpēju krustošanos (piemēram, caurumus vai viena poligona malas saskaršanos).
 
-```{r}
+```{r Ģeometriju pārbaude, echo=TRUE}
 v=data.frame(geom_val=st_is_valid(centrs_kopa$geometry, reason=TRUE))
 sort(unique(v$geom_val))
 
