@@ -1,0 +1,48 @@
+---
+title: "Otrais uzdevums"
+author: "Betija Rubene"
+date: "2025-01-08"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Darbam nepieciešamo bibliotēku ielāde
+
+```{r, message = FALSE, warning=FALSE}
+library(sf)
+library(sfarrow)
+library(microbenchmark)
+library(archive)
+library(curl)
+```
+
+Centra virsmežniecības faila lejupielāde
+
+```{r}
+url <- "https://data.gov.lv/dati/lv/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92/resource/392dfb67-eeeb-43c2-b082-35f9cf986128/download/centra.7z"
+dest <- "C:/Users/ruben/Documents/HiQBioDiv_macibas_fork/centra_mezi.7z"
+
+curl_download(url, destfile = dest)
+file.exists(dest)
+```
+
+Atarhivēšana
+
+```{r, message=FALSE}
+archive_extract(dest, dir = "C:/Users/ruben/Documents/HiQBioDiv_macibas_fork/centra_mezi")
+```
+
+Failu apskate atarhivētajā mapē
+
+```{r}
+getwd()
+list.files("../centra_mezi")
+```
+
+
+
+
+
