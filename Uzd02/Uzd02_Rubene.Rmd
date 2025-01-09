@@ -5,19 +5,22 @@ date: "2025-01-08"
 output: rmarkdown::github_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
 Darbam nepieciešamo bibliotēku ielāde
 
-```{r, message = FALSE, warning=FALSE}
+```{r, message = FALSE, warning = FALSE}
 library(sf)
 library(sfarrow)
 library(microbenchmark)
 library(archive)
 library(curl)
+library(fs)
 ```
+
+# Pirmā daļa - lejupielāde, atarhivēšana, failu izmēri un ielasīšanas ātrums
 
 Centra virsmežniecības faila lejupielāde
 
@@ -26,23 +29,59 @@ url <- "https://data.gov.lv/dati/lv/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92
 dest <- "C:/Users/ruben/Documents/HiQBioDiv_macibas_fork/centra_mezi.7z"
 
 curl_download(url, destfile = dest)
-file.exists(dest)
+file.exists(dest) # fails ir atrodams direktorijā
 ```
 
 Atarhivēšana
 
-```{r, message=FALSE}
+```{r, message = FALSE}
 archive_extract(dest, dir = "C:/Users/ruben/Documents/HiQBioDiv_macibas_fork/centra_mezi")
 ```
 
 Failu apskate atarhivētajā mapē
 
 ```{r}
-getwd()
 list.files("../centra_mezi")
 ```
 
+Cik daudz vietas aizņem ESRI shapefile, GeoPackage un geoparquet?
+Sākumā ielasu 2651. nodaļas datus
 
+```{r}
+file_size("../centra_mezi/nodala2651.shp")
+```
 
+Izveidoju GeoPackage failu. Cik daudz vietas tas aizņem?
 
+```{r}
+nod2651 <- st_read("../centra_mezi/nodala2651.shp", quiet = TRUE)
+st_write(nod2651, "C:/Users/ruben/Documents/HiQBioDiv_macibas_fork/centra_mezi/nodala2651.gpkg", quiet = TRUE)
+file_size("../centra_mezi/nodala2651.gpkg")
+```
+
+Cik daudz vietas aizņem geoparquet?
+
+```{r}
+st_write_parquet(nod2651, "C:/Users/ruben/Documents/HiQBioDiv_macibas_fork/centra_mezi/nodala2651.parquet")
+file_size("../centra_mezi/nodala2651.parquet")
+```
+Tātad visvairāk vietas aizņem GeoPackage, shapefile aptuveni divreiz mazāk, geoparquet fails aizņem vēl mazliet mazāk vietas.
+
+Kā ir ar failu ielasīšanas ātrumiem? Ar microbenchmark ielasu katru failu 10 reizes
+
+```{r, message = FALSE}
+atrumsshp <- microbenchmark(st_read  ("../centra_mezi/nodala2651.shp"),
+                         times = 10)
+atrumsgpkg <- microbenchmark(st_read  ("../centra_mezi/nodala2651.gpkg"),
+                            times = 10)
+atrumspar <- microbenchmark(st_read_parquet ("../centra_mezi/nodala2651.parquet"),
+                            times = 10)
+summary(atrumsshp)
+summary(atrumsgpkg)
+summary(atrumspar)
+```
+
+Geoparquet fails ielasās krietni ātrāk nekā pārējie formāti
+
+# Otrā daļa - 
 
