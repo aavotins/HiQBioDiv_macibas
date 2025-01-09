@@ -10,7 +10,7 @@ GeoPackage un geoparquet (ja vēlaties arī ESRI File Geodatabase, kuras
 uzrakstīšanai var nākties izmantot citu programmu) failu: - aizņemto
 diska vietu; - ielasīšanas ātrumu vismaz 10 ielasīšanas izmēģinājumos.
 
-## Faila lejupielāde un izpakošana 
+## Faila lejupielāde un izpakošana
 
 Izveidosim atsevišķus mainīgos, kuros saglabāsim lejupielādes saiti,
 lejupielādes ceļu un izpakošanas ceļu:
@@ -26,6 +26,10 @@ Turklāt izveidosim arī pašu direktoriju.
 ``` r
 dir.create(izpakosanas_cels, recursive = TRUE) # Ja vēlāma direktorija vēl nav izveidota
 ```
+
+    ## Warning in dir.create(izpakosanas_cels, recursive = TRUE):
+    ## 'C:\Users\user\Desktop\HiQBioDiv_macibas\2uzd\centra_virsmezn_dati' already
+    ## exists
 
 No atvērto datu portāla lejupielādēsim Centra virsmežniecības datus.
 
@@ -59,6 +63,14 @@ failu. Pakotne {sf} automātiski nolasīs visus ar shapefailu saistītos
 failus, kas atrodas tajā pašā mapē. Šis process notiek fonā, un nav
 jānorāda katra faila ceļš atsevišķi.
 
+``` r
+#Ja pakotne nav instsalēta: install.packages("sf")
+library(sf)
+
+shapefile_cels <- "C:/Users/user/Desktop/HiQBioDiv_macibas/2uzd/centra_virsmezn_dati/nodala2651.shp"
+nod2651_shapefile <- st_read(shapefile_cels)
+```
+
 Nolasīto shapefile pārveidosim GeoPackage un geoparquet formātos.
 Atsevišķos mainīgajos norādīsim ceļus uz katra faila vēlamo izvietošanas
 vietu, līdz ar to definējot arī faila nosaukumu.
@@ -70,13 +82,7 @@ library(sfarrow)
 # Pārveidot GeoPackage formātā
 geopackage_cels <- "C:/Users/user/Desktop/HiQBioDiv_macibas/2uzd/centra_virsmezn_dati/nodala2651.gpkg"
 st_write(nod2651_shapefile, geopackage_cels, driver = "GPKG")
-```
 
-    ## Writing layer `nodala2651' to data source 
-    ##   `C:/Users/user/Desktop/HiQBioDiv_macibas/2uzd/centra_virsmezn_dati/nodala2651.gpkg' using driver `GPKG'
-    ## Writing 91369 features with 70 fields and geometry type Multi Polygon.
-
-``` r
 # Pārveidot geoparquet formātā
 geoparquet_cels <- "C:/Users/user/Desktop/HiQBioDiv_macibas/2uzd/centra_virsmezn_dati/nodala2651.parquet"
 st_write_parquet(nod2651_shapefile, geoparquet_cels)
@@ -129,6 +135,18 @@ rm(failu_info) #Izdzēst mainīgos, kas vairs nav nepieciešami.
 Veiksim 20 ielasīšanas mēģinājumus katram failam, rezultātus reģistrējot
 jaunā datu rāmī.
 
+``` r
+#Ja pakotne nav instsalēta: install.packages("microbenchmark")
+library(microbenchmark)
+
+ielasisanas_atrums <- microbenchmark(
+  nod2651_shapefile <- st_read(shapefile_cels),
+  nod2651_geopackage <- st_read(geopackage_cels),
+  nod2651_geoparquet <- st_read_parquet(geoparquet_cels),
+  times = 20
+)
+```
+
 Iegūtais datu rāmis satur kolonnas ar mēģināto funkciju un ielādes
 ātrumu nanosekundēs. Saīsināsim katra tipa faila atveršanas funkciju
 līdz vienkāršiem paplašinājuma nosaukumiem:
@@ -158,17 +176,19 @@ cat(sprintf("Faila veids: %s\n Min.: %.2f, Max.: %.2f, Vidējais: %.2f, Mēģin�
 ```
 
     ## Faila veids: geopackage
-    ##  Min.: 3693.45, Max.: 5187.92, Vidējais: 4237.97, Mēģinājumi: 20
+    ##  Min.: 2143.20, Max.: 2623.25, Vidējais: 2388.84, Mēģinājumi: 20
     ## 
     ##  Faila veids: geoparquet
-    ##  Min.: 720.68, Max.: 1789.68, Vidējais: 1184.01, Mēģinājumi: 20
+    ##  Min.: 521.40, Max.: 1026.19, Vidējais: 730.76, Mēģinājumi: 20
     ## 
     ##  Faila veids: shapefile
-    ##  Min.: 5907.04, Max.: 7695.44, Vidējais: 6650.98, Mēģinājumi: 20
+    ##  Min.: 3334.56, Max.: 4036.48, Vidējais: 3623.86, Mēģinājumi: 20
 
 **Secinājums**: Visātrāk tika atvērts *.parquet* fails.
 
 ``` r
+file.remove(geopackage_cels, geoparquet_cels) #izdzest liekus failus
+
 #Izdzēst mainīgos, kas vairs nav nepieciešami.
 rm(rezultati_ielasisanas_atrums, ielasisanas_atrums, nod2651_geopackage, nod2651_geoparquet,
    nod2651_shapefile, shapefile_cels, geopackage_cels, geoparquet_cels
@@ -190,6 +210,10 @@ parquet_dir_cels <- "C:/Users/user/Desktop/HiQBioDiv_macibas/2uzd/centra_virsmez
 dir.create((parquet_dir_cels), recursive = TRUE)
 ```
 
+    ## Warning in dir.create((parquet_dir_cels), recursive = TRUE):
+    ## 'C:\Users\user\Desktop\HiQBioDiv_macibas\2uzd\centra_virsmezn_dati\parquet'
+    ## already exists
+
 Atradīsim visus shapefailus darba direktorijā, saglabāsim visus
 absolūtos ceļus uz shapefailiem vienā vektorā.
 
@@ -199,6 +223,18 @@ shapefile_visi <- list.files(izpakosanas_cels, pattern = "\\.shp$", full.names =
 
 Pārveidosim shapefailus *.parquet* formātā un saglabāsim tos
 apakšdirektorijā.
+
+``` r
+for (katrs in shapefile_visi) {
+  shapefile_dati <- st_read(katrs) #nolasīt šeipfailu
+  # Izveidot parquet failu
+  parquet_fails <- file.path(parquet_dir_cels, paste0(tools::file_path_sans_ext(basename(katrs)), ".parquet"))
+  st_write_parquet(shapefile_dati, parquet_fails)
+}
+
+#Izdzēst mainīgos, kas vairs nav nepieciešami.
+rm(shapefile_dati, parquet_file, parquet_fails, katrs, shapefile_visi)
+```
 
 ## Failu nolasīšana, apvienošana un apstrāde
 
