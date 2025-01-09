@@ -4,20 +4,223 @@ skaitļošana
 
 ## Termiņš
 
-Līdz 2025-01-10, izmantojot git pull -\> commit -\> push uz zaru
-“Dalibnieki”, šī uzdevuma direktorijā pievienojot .Rmd vai .qmd failu,
-kura nosaukums ir Uzd04\_\[JusuUzvards\], piemēram, `Uzd04_Avotins.Rmd`,
-kas sagatavots izvadei github dokumentā (piemēram, YAML galvenē norādot
-`output: rmarkdown::github_document`), un tā radīto izvades failu.
+Līdz 2025-01-10, izmantojot
+[fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)
+un [pull
+request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
+uz zaru “Dalibnieki”, šī uzdevuma direktorijā pievienojot .Rmd vai .qmd
+failu, kura nosaukums ir Uzd04\_\[JusuUzvards\], piemēram,
+`Uzd04_Avotins.Rmd`, kas sagatavots izvadei github dokumentā (piemēram,
+YAML galvenē norādot `output: rmarkdown::github_document`), un tā radīto
+izvades failu.
 
 ## Premise
 
-Skatīt pamata zarā
+Programmēšanas valodas ir veidotas tā, lai lietotāji (cilvēki) ar
+vienkāršām komandu rindām dotu uzdevumus datoram. Šīs komandu rindas
+veido funkcijas, kuru uzbūve ir vairāk vai mazāk paslēpta (R vidē to
+saturu var apskatīt vienkārši konsolē ierakstot funkciju bez iekavām un
+to aktivizējot,
+[piemēram](https://intro2r.com/looking-behind-the-curtain.html)), no
+kurām daļa ir pieejamas līdz ar bāzes instalāciju, citas - pievienojot
+papildinājumus, kas R vidē ir pakotnes. Šī projekta ietvaros izmantosim
+jau esošo R un tās pakotņu funkcionalitāti, tomēr, tomēr, kļūdu
+mazināšanai un skriptu saīsināšanai, apvienosim R un pakotņu funkcijas
+savās - lietotāja funkcijās. Galvenā domā - ja kādu koda apgabalu ir
+nepieciešams atkārtot vairākas reizes, tikai mainot ievades parametrus
+(esošo funkciju argumentus), šo apgabalu ir vērts sagatavot kā funkciju.
+Iepazīties ar funkciju veidošanu variet [šeit - plaši, bet
+vienkārši](https://intro2r.com/functions-in-r.html), konspektīvāk -
+[šeit](https://r4ds.hadley.nz/functions) un
+[šeit](https://r4ds.had.co.nz/functions.html), bet šeit jau
+[advancētākiem mērķiem](http://adv-r.had.co.nz/Functions.html)
+
+Domājot par funkcijām, ir jādomā par [datu
+veidiem](https://intro2r.com/data-types.html) un
+[struktūrām](https://intro2r.com/data-structures.html) (skatiet arī
+[šo](http://adv-r.had.co.nz/Data-structures.html)) R. Klasiskā datu
+zinātnē daudz tiek izmantoti
+[vektori](https://r4ds.had.co.nz/vectors.html) (skatiet arī iepriekšējā
+teikuma resursus). Daudzi aprēķini ir daudz efektīvāki, ja tos iespējams
+vektorizēt. Ne vienmēr tas tā ir attiecībā uz ģeodatiem, tomēr ir vērts
+vektorizēt visu, ko vien ir iespējams.
+
+Ja kādas (R pieejamās vai pašu veidotās, jau ar mērķi darbu - paātrināt
+un skriptu - vienkāršot) funkcijas ir jāatkārto, mainot ievades
+vērtības, piemēram, objektus vai to daļas, ir vērts ieviest iteratīvus
+aprēķinus. Tomēr, pirms ķeršanās pie tiem, ir vērts pakavēties pie
+loģikas - ne vienmēr, bet nereti ir jāizdara relatīvi vienkāršas izvēles
+par veicamo darbu, atkarībā no aprēķinu rezultātiem. Lai tas nebūtu
+jādara interaktīvi, ja dati un uzdevums pieļauj mijiedarbības ar
+pētnieku trūkukumu, ir vērts ieviest [nosacījumu
+funkcijas](https://intro2r.com/conditional-statements.html), to
+formulēšanai izmantojot [loģikas
+operatorus](https://intro2r.com/combining-logical-operators.html).
+
+Iteratīvai darbību atkārtošanai ir pieejami
+[cikli](https://intro2r.com/loops.html) - dažādās programmēšanas valodās
+izmanto `for` un `while` ciklus, tiem ir kopīgi definēšanas un darbības
+principi neatkarīgi no valodas, tomēr ir jāuzmanās ar skaitīšanas
+sākumu - R sāk skaitīt ar vērtību 1. `for` ciklu darbības ātrumu ļoti
+ietekmē ievades un izvades formāti, rezultātu ievietošanas objektu
+veidi. Kopumā ātrākas ir `apply` [saimes
+funkcijas](https://intro2r.com/loops.html#if-not-loops-then-what) no
+bāzes R. Vēl viens avots dažādiem [bāzes R rīkiem un to
+izmantošanai](https://r4ds.hadley.nz/base-r). Tīri strukturētu datu
+zinātnei, jo sevišķi iteratīvu uzdevumu veikšanai tabulāros datos,
+spēcīgs atbalsts ir [tidyverse pieejamie
+rīki](https://r4ds.hadley.nz/iteration). Ja uzdevumi ir veicami
+strukturētiem datiem, ir vērts apsvērt [datubāzu
+lietošanu](https://r4ds.hadley.nz/databases) un lokāliem uzdevumiem
+sevišķi spēcīgos [Arrow un DuckDB
+risinājumus](https://r4ds.hadley.nz/arrow), kuriem nereti ir iespējams
+izmantot iepriekš piesauktās {tidyverse} iespējas. Tomēr ne visiem
+datiem tas ir iespējams vai pietiekoši vienkārši iespējojams, jo
+sevišķi, ja izmantojamas pašu sagatavotās funkcijas un ir domas par
+daudzkodolu uzdevumiem. Tādēļ bieži procesu automatizēšanai tiek
+izmantoti `for` cikli.
+
+R ir vientermināla programma. Tas nozīmē, ka vienlaikus ir izveidots
+viens savienojums ar procesoru (parasti - CPU, bet arī GPU). Daļa R
+funkciju, jo sevišķi ar apjomīgāku ģeoprocesēšanu saistītās, mēdz
+izmantot vairākas skaitļošanas vienības (procesoru kodolus; parasti
+skaitļošana notiek CPU, tādēļ CPU kodolus jeb centrālās procesēšanas
+vienības), ja tās ir pieejamas. Daļai funkciju šāda uzvedība ir īpaši
+jāiespējo. Tomēr vairums funkciju pēc noklusējuma (vai vispār) izmanto
+vienu CPU kodolu. Funkcijām mēdz būt dažādas uzvedības, tomēr R vidē
+visbiežāk norisinās datu ielasīšana operatīvajā atmiņā un tikai tad to
+apstrāde. Tas nozīmē, ka R (visbiežāk, bet ne vienmēr!; vairums
+programmu, ne tikai R) cenšas vienlaikus domāt par visiem datiem, kas
+nozīmē ļoti lielu domāšanu, kas novedpie ilga aprēķinu laika. Nereti
+ģeoprocesēšanas uzdevumos šo dažādām programmām raksturīgouzvedību (un
+līdz ar to, operatīvās atmiņas jeb RAM ierobežojumus) var iegrožot,
+veicot aprēķinus nelielās telpas daļās atsevišķi - iteratīvos procesos
+virzoties cauri iepriekš definētām telpas daļām. Ir uzdevumi, kuriem tas
+nav sevišķi vienkārši, jo informācija no jebkuras telpas daļas ir
+nepieciešama jebkuras citas daļas aprēķinos, tomēr vismaz attiecībā uz
+vairumu ģeoprocesēšanas uzdevumu (šī projekta kontekstā - datu
+sagatavošanu modelēšnaai) tā nav. Ja atsevišķās iterācijas ir uzskatāmas
+par savstarpēji neatkarīgām (malu problēmas ģeoproceēšanā nereti var
+novērst ar buferzonām telpiskajā atlasē) un ir pietiekošs operatīvās
+atmiņas daudzums, šīs savstarpēji neatkarīgās iterācijas ir iespējams
+veikt vienlaikus - nosūtot kā atsevišķus uzdevumus atsevišķiem CPU
+kodoliem jeb izmantojot paralēlo skaitļošanu.
+
+Līdzīgu uzbūvi `for` cikliem, nodrošinot paralēlo skaitļošanu R iespējo
+pakotnes {doParallel} un {foreach}. Ar tām nepieciešams iepazīties
+[šeit](https://cran.r-project.org/web/packages/doParallel/vignettes/gettingstartedParallel.pdf)
+un
+[šeit](https://cran.r-project.org/web/packages/foreach/vignettes/foreach.html),
+un
+[šeit](https://unc-libraries-data.github.io/R-Open-Labs/Extras/Parallel/foreach.html).
+Var būt noderīgi ieskatīties arī
+[šeit](https://privefl.github.io/blog/a-guide-to-parallelism-in-r/) un
+[šeit](http://pablobarbera.com/ECPR-SC105/code/02-parallel-computing.html).
+Plānot daudzkodolu uzdevumus, ir vērts tikai tad, ja ir pietiekoši daudz
+RAM un uzdevumi ir patiešām apjomīgi - kā piedāvātajos avotos pamanījāt,
+mazu uzdevumu veikšanai paralēlā skaitļošana nav efektīva. Ir jārēķinās,
+ka uzdevumu sadalīšanai, izplatīšanai starp CPU kodoliem un atkal
+savākšanai kopā, ir nepieciešams laiks. Dažādos ģeoprocesēšanas
+uzdevumos to veikšanai nepieciešamais laiks (un nereti arī nepieciešamā
+RAM) strauji pieaug līdz ar analīzes telpas platību un izšķirtspēju.
+
+Tas nozīmē, ka telpas sadalīšanai ir liela nozīme, bet procesu
+paralelizēšanas iespējas ir jāvērtē pēc pieejamā CPU kodolu un tam
+atbilstošas RAM. Neizbēgami, ir nepieciešama mērogošana - izmēģinājumu
+aprēķini ar dažādām pieejām attiecībā pret izmantotajām funkcijām,
+ievades un izvades datiem, telpisko pārklājumu un izšķirtspēju. Nereti
+laba doma ir starprezultātus saglabāt diskā un apvienot pēc aprēķinu
+veikšanas, nevis uzturēt operatīvajā atmiņā kā to piedāvā {doParallel} +
+{foreach}.
 
 ## Uzdevums
 
-Skatīt pamata zarā
+Uzdevuma veikšanai nepieciešami Valsts meža dienesta Meža Valsts
+reģistra (MVR) Centra virsmežniecības dati no atvērto datu portāla, kas
+izmantoti [otrajā uzdevumā](./Uzd02/Uzdevums02.md).
+
+1.  Sagatavojiet funkciju ar nosaukumu `mana_funkcija`, kura (secīgi):
+
+- no piedāvātā MVR faila atlasa mežaudzes, kurās valdošā koku suga ir
+  priede (sugas kods ir “1”);
+
+- sagatavo tādu rastru 10 m izšķirtspējā visai valsts teritorijai, kurā
+  priežu mežaudzes no iepriekšējā punkta ir apzīmētas ar `1`, pārējās
+  Latvijas sauzsemes teritorijā esošās šūnas apzīmētas ar `0` un pārējās
+  šūnas ir `NA`, un tas atbilst [projekta *Zenodo*
+  repozitorijā](https://zenodo.org/communities/hiqbiodiv/records?q=&l=list&p=1&s=10&sort=newest)
+  ievietotajam [references slānim](https://zenodo.org/records/14497070)
+  `LV10m_10km.tif`;
+
+- iepriekšējā punkta rastru pārveido uz 100 m šūnu, aprēķinot priežu
+  mežaudžu platības īpatsvaru (no kopējās platības) ik 100 m šūnā,
+  nodrošinot atbilstību [projekta *Zenodo*
+  repozitorijā](https://zenodo.org/communities/hiqbiodiv/records?q=&l=list&p=1&s=10&sort=newest)
+  ievietotajam [references slānim](https://zenodo.org/records/14497070)
+  `LV100m_10km.tif`;
+
+- saglabā iepriekšējā punktā izveidoto slāni (ar 100 m izšķirtspēju) kā
+  GeoTIFF failu ar relatīvo ceļu norādītā vietā cietajā diskā, pieņemot
+  ievades faila nosaukumu.
+
+2.  Sagatavoto funkciju `mana_funkcija` izmēģiniet [otrajā
+    uzdevumā](./Uzd02/Uzdevums02.md) sagatavotajam *gqoparquet* failam,
+    kurā ir apvienotas visas Centrālās virsmežniecības nodaļas. Cik
+    daudz laika aizņem šis uzdevums? Cik CPU kodolus tas aizņem
+    periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas uzdevuma
+    veikšanai, kādu tās apjomu R izmantoja?
+
+3.  Sagatavojiet katras nodaļas MVR datus atsevišķā *geoparquet* failā,
+    kura nosaukums satur nodaļas nosaukumu. Iteratīva procesa, piemēram,
+    `for` cikla, veidā, ieviesiet sagatavoto funkciju katrai nodaļai
+    atsevišķi. Cik daudz laika aizņem šis uzdevums? Cik CPU kodolus tas
+    aizņem periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas
+    uzdevuma veikšanai, kādu tās apjomu R izmantoja?
+
+4.  Atkārtojiet iepriekšējo uzdevumu, izmantojot {doParallel} un
+    {foreach}, bet nosakiet klāseteri kā tieši vienu CPU kodolu lielu.
+    Cik daudz laika aizņem šis uzdevums? Cik CPU kodolus tas aizņem
+    periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas uzdevuma
+    veikšanai, kādu tās apjomu R izmantoja?
+
+5.  Atkārtojiet iepriekšējo uzdevumu paralēli uz vismaz diviem CPU
+    kodoliem. Cik daudz laika aizņem šis uzdevums? Cik CPU kodolus tas
+    aizņem periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas
+    uzdevuma veikšanai, kādu tās apjomu R izmantoja?
 
 ## Padomi
 
-Skatīt pamata zarā
+1.  Mērogojot procesus, laba doma ir pieskatīt CPU darbību un RAM
+    aizpildījumu. Ja RAM strauji aizpildās un nav indikāciju funkcijās
+    iebūvētai procesu piebremzēšanai, laba doma var būt aptuvēr procesus
+    pirms tiek pārsniegta arī *swp* atmiņa, ja tāda ir pieejama. Ja
+    tomēr tas gadīsies - nekam sliktam nevajadzētu notikt, bet
+    rēķinaties, ka var nākties pārstartēt iekārtu. Vienkāršai
+    uzraudzībai Windows lietotāji var izmantot *Task manager* (Ctrl +
+    Alt + Delete -\> Task manager -\> Performance), *Unix-like*
+    operētājsistēmās rekomendēju uzinstalēt un terminālī/konsolē
+    izmantot `htop` ([Linux](https://itsfoss.com/use-htop/),
+    [MacOS](https://www.cyberciti.biz/faq/install-htop-on-macos-unix-desktop-running-macbook-pro/))
+
+2.  Plānojot uzdevumus vairākos CPU kodolos, uzmanību fokusējiet
+    fiziskajām procesēšanas vienībām - Windows OS tās mēdz virtualizēt.
+    Tas nozīmē, ka tās nav neatkarīgas vienības, tā dēļ pat, ja uzdevumu
+    veikšanai būs pietiekoša RAM, skaitļošana būs ievērojami lēnāka.
+
+3.  Rosoties ar paralēlo skaitļošanu, jo sevišķi Windows vidē, bet arī
+    virtuālajās mašīnās, kurām skaitļošanas laikā var būt nepieciešama
+    pieslēgšanās un atslēgšanās, saglabājiet vismaz vienu fizisko CPU
+    kodolu brīvi pieejamu (neaizņemtu).
+
+4.  Jums jau vajadzētu būt pazīstamiem ar {microbenchmark} laika
+    mērogošanai. Daudzējādā ziņā tā ir laba. Tomēr reizēm pietiek iegūt
+    vispārīgu indikāciju izmantotajam laikam, piemēram, bez
+    replikāt-izmēģinājumiem, kas nodrošina labāku informāciju par
+    stabilitāti, ņemot vērā sagatavošanos un darbu uzsākšanu. Šadai
+    indikācijai var noderēt bāzes R funkcija `Sys.time`.
+
+5.  Iteratīvo procesu sagatavošanai var būt nepieciešams vadības
+    saraksts. Šī uzdevuma ietvaros, tam par pamatu var kalpot nodaļu
+    nosaukumi, kas apkopoti kopā ar relatīvajiem ceļiem failu kokā uz
+    tām. Šāda saraksta sagatavošanai piemērota ir bāzes R funkcija
+    `list.files`
