@@ -98,8 +98,28 @@ dir_izvade <- "C:/Users/user/Desktop/HiQBioDiv_macibas/4uzd/"
 system.time(mana_funkcija(dir_Centra, dir_izvade))
 ```
 
-    
+    ## Loading required package: sp
 
+    ## 
+    ## Attaching package: 'raster'
+
+    ## The following object is masked from 'package:dplyr':
+    ## 
+    ##     select
+
+    ## 
+    ## Attaching package: 'fasterize'
+
+    ## The following object is masked from 'package:graphics':
+    ## 
+    ##     plot
+
+    ## The following object is masked from 'package:base':
+    ## 
+    ##     plot
+
+    ##    user  system elapsed 
+    ##  288.09   60.63  354.16
 
 **Atbilde:** Funkcijas izpilde aizņēma 528,49 sekundes jeb 8,8 minūtes,
 tika izmantoti 21,09 GB RAM, un R sesijā pastāvīgi bija nodarbināti 3
@@ -130,7 +150,8 @@ system.time(
   )
 ```
 
-
+    ##    user  system elapsed 
+    ## 1307.69  328.75 1672.92
 
 **Atbilde:** Funkcijas izpilde aizņēma 2226,89 sekundes jeb 37,11
 minūtes, tika izmantoti 24,8 GB RAM, un R sesija pastāvīgi izmantoja 3
@@ -167,7 +188,8 @@ stopCluster(cl)
 print(laika_merijums)
 ```
 
-
+    ##    user  system elapsed 
+    ##    0.25    0.31 1673.54
 
 **Atbilde:** Neredzu nekādas īpašas atšķirības no iepriekšējā varianta.
 Vienīgais, ka ar R sesiju iedarbinātie CPU nemainās un vienmēr ir
@@ -208,7 +230,8 @@ stopCluster(cl)
 print(laika_merijums)
 ```
 
-
+    ##    user  system elapsed 
+    ##    0.25    0.31 1085.24
 
 **Atbilde:** Pastāvīgi tika izmantoti 6 CPU: trīs un trīs paralēli, kā
 arī periodiski vēl 1–3. Izmantotas 25,1 GB RAM. Patērētais laiks:
