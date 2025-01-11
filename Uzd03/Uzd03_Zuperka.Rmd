@@ -1,0 +1,302 @@
+---
+title: "03Uzd_Zuperka"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<br> 1) Lejupielādējiet references slāņus no projekta repozitorija (gan vektordatus, gan rastu). Iepazīstieties ar WFS un tā nodrošināšanu R.
+```{r lejupielādēju un atarhivēju datus, echo=FALSE}
+if (!require("httr")) install.packages("httr")
+
+
+# Lejupielāde rastra slānim
+reference_url_raster <- "https://zenodo.org/api/records/14497070/files-archive"
+
+reference_layer_directory_raster <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_reference_grids_raster.zip"
+
+GET(reference_url_raster, write_disk(reference_layer_directory_raster, overwrite=TRUE))
+
+#Lejupielāde vektordatiem
+
+reference_url_vector <- "https://zenodo.org/api/records/14277114/files-archive"
+
+reference_layer_directory_vector <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_reference_grids_vector.zip"
+
+GET(reference_url_vector, write_disk(reference_layer_directory_vector, overwrite = TRUE))
+```
+
+```{r atarhivēšana, echo=FALSE}
+
+reference_zip_raster <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_reference_grids_raster.zip"
+reference_zip_vector <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_reference_grids_vector.zip"
+
+if (!require("archive")) install.packages("archive")
+
+ref_layer_extrdir_raster <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_raster_reference_grids"
+ref_layer_extrdir_vector <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_vector_reference_grids"
+
+if (!dir.exists(ref_layer_extrdir_raster)) dir.create(ref_layer_extrdir_raster, recursive = TRUE)
+if (!dir.exists(ref_layer_extrdir_vector)) dir.create(ref_layer_extrdir_vector, recursive = TRUE)
+
+archive_extract(reference_zip_raster, ref_layer_extrdir_raster)
+archive_extract(reference_zip_vector, ref_layer_extrdir_vector )
+```
+<br> 2) Lejupielādējiet Lauku atbalsta dienesta datus par teritoriju, kuru aptver otrā uzdevuma Mežu valsts reģistra dati
+```{r WFS servera iestatīšana un datu lejupielāde, echo=FALSE}
+
+if (!require("ows4R")) install.packages("ows4R")
+if (!require("arrow")) install.packages("arrow")
+if (!require("sfarrow")) install.packages("sfarrow")
+if (!require("sf")) install.packages("sf")
+if (!require("ggplot2")) install.packages("ggplot2")
+if (!require("httr")) install.packages("httr")
+
+
+#Definēju URL
+LAD_url <- "https://karte.lad.gov.lv/arcgis/services/lauki/MapServer/WFSServer"
+LAD_WFS <- WFSClient$new(LAD_url, serviceVersion = "2.0.0")
+
+#Apskatos kādi slāņi ir pieejami un uzreiz saglabāju nosaukumu
+LAD_layer_name <- LAD_WFS$getFeatureTypes(pretty = TRUE)$name[1]
+
+#Ielasu parquet no otrā uzdevuma
+MVR_data <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd02/Centrs_combined.parquet"
+MVR_parquet <- read_parquet(MVR_data)
+
+#Atkaln negrib lasīties iekšā uzreiz ar st_as_sf, bet nākamajā daļā ielasās kā vajag
+
+geometry_raw <- lapply(MVR_parquet$geometry, as.raw)
+MVR_parquet$geometry_sfc <- st_as_sfc(geometry_raw, wkt = FALSE)
+MVR_sf <- st_as_sf(MVR_parquet, crs = 3059)
+
+#Izvelku meža sf slāņa koordinātu rāmi
+MVR_bbox <- st_bbox(MVR_sf)
+MVR_bbox_cords <- paste(MVR_bbox["xmin"], MVR_bbox["ymin"], MVR_bbox["xmax"], MVR_bbox["ymax"], sep = ",")
+
+#Lejupielādēju un ielasu interesējošo teritoriju
+LAD_WFS <- parse_url(LAD_url)
+LAD_WFS$query <- list(
+  service = "WFS",
+  request = "GetFeature",
+  bbox = MVR_bbox_cords,
+  srsName = "EPSG:3059",
+  typename = LAD_layer_name)
+
+request_url <- build_url(LAD_WFS)
+
+LAD_data <- st_read(request_url)
+
+#Saglabāju datus parquet formātā
+
+LAD_data_directory <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_data"
+
+if (!dir.exists(LAD_data_directory)) dir.create(LAD_data_directory, recursive = TRUE)
+
+LAD_data_save <- file.path(LAD_data_directory, "LAD_data.parquet")
+
+st_write_parquet(LAD_data, LAD_data_save)
+
+#Pārbaudu vai viss kārtībā un vai sakrīt
+ggplot() +
+  geom_sf(data = MVR_sf, color = "yellow") +
+  geom_sf(data = LAD_data, color = "black")
+
+#Tālāk vajag tikai LAD_data.parquet slāni, tāpēc iztīru atmiņu lai lieki neaizņem vietu
+rm(list = ls())
+gc()
+```
+<br> Nākamais punkts sagāja biš netur jo domāju ka jādabū Latvijas robežu šeips no interneta. Atstāju nākotnei kā info avotu bet uzlieku eval=FALSE lai neizpilda
+```{r pārbaudu robežas brīvpieejas datos, echo=FALSE, eval=FALSE}
+if (!require("sf")) install.packages("sf")
+if (!require("geodata")) install.packages("geodata")
+if (!require("ggplot2")) install.packages("ggplot2")
+
+#Ielasu vajadzīgo failu
+LAD_dir <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_data/LAD_data.parquet"
+LAD_data <- read_parquet(LAD_dir)
+
+LAD_sf <- st_as_sf(LAD_data)
+
+#Drošībai pārbaudu vai visas ģeometrijas ir ok un pārtaisu lai būtu ja kāda ir
+st_is_valid(LAD_sf)
+st_make_valid(LAD_sf)
+
+#Iegūstu robežu failu
+
+Latvia_borders_directory <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/Latvia_borders"
+
+if (!dir.exists(Latvia_borders_directory)) dir.create(Latvia_borders_directory, recursive = TRUE)
+
+gadm(country = "Latvia", level=0, path=Latvia_borders_directory)
+
+Latvia_borders_RDS <- readRDS("C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/Latvia_borders/gadm/gadm41_LVA_0_pk.rds")
+
+Latvia_borders_sf <- st_as_sf(Latvia_borders_RDS)
+
+Latvia_borders_3059 <- st_transform(Latvia_borders_sf, 3059)
+st_transform(LAD_sf, 3059)
+
+st_make_valid(Latvia_borders_sf)
+
+LAD_bbox <- st_bbox(LAD_sf)
+
+ggplot() +
+  geom_sf(data = Latvia_borders_3059) +
+  geom_sf(data = LAD_sf, color = "yellow") +
+  coord_sf(xlim = c(LAD_bbox["xmin"], LAD_bbox["xmax"]),
+           ylim = c(LAD_bbox["ymin"], LAD_bbox["ymax"]))
+```
+<br> 2) Atbilstoši referencei (10m izšķirtspējā), rasterizējiet iepriekšējā punktā lejupielādētos vektordatus, sagatavojot GeoTIFF slāni ar informāciju par vietām, kurās ir lauku bloki (kodētas ar 1) vai tās atrodas Latvijā, bet tajās nav lauku bloki vai par tiem nav informācijas (kodētas ar 0). Vietām ārpus Latvijas saglabājiet šūnas bez vērtībām.
+```{r rasterizēšana, echo=FALSE}
+if (!require("arrow")) install.packages("arrow")
+if (!require("sf")) install.packages("sf")
+if (!require("fasterize")) install.packages("fasterize")
+if (!require("raster")) install.packages("raster")
+
+#Ielasu vajadzīgo failu
+LAD_dir <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_data/LAD_data.parquet"
+
+LAD_sf <- st_as_sf(read_parquet(LAD_dir))
+
+#Drošībai pārbaudu vai visas ģeometrijas ir ok un pārtaisu lai būtu ja kāda ir
+st_is_valid(LAD_sf)
+st_make_valid(LAD_sf)
+
+#Ielasu references rastru
+Latvia_ref_raster <- raster("C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_raster_reference_grids/LV10m_10km.tif")
+
+ext <- raster::extent(st_bbox(LAD_sf))
+
+#Apgriežu ievades rastru
+Latvia_ref_raster_crop <- crop(Latvia_ref_raster, ext)
+
+#Nodrošinu ka CRS sakrīt abiem
+st_crs(LAD_sf) <- 3059
+crs(Latvia_ref_raster_crop) <- CRS("epsg:3059")
+
+#Rasterizēju sf failu
+LAD_raster <- fasterize(LAD_sf, Latvia_ref_raster_crop, background = NA) 
+
+#Pārtaisu izgriezto rastru tā lai vērtības būtu 0
+Latvia_ref_raster_crop[!is.na(Latvia_ref_raster_crop)] <- 0
+
+#Apvienoju ar sākotnējo rastru 
+LAD_raster_merge <- merge(LAD_raster, Latvia_ref_raster_crop, fun = "max")
+
+#Saglabāju ar integer vērtībām
+writeRaster(LAD_raster_merge, "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster.tif", format = "GTiff", datatype = "INT1U", overwrite = TRUE)
+
+#Paskatos attēlu un pārliecinos par rezultātiem - izmantoju rasterVis optimālāka attēla izveidei (ggplot vajadzētu pārveidot par data frame, kas aizņem milzīgu apjomu atmiņas un laika, bet raster::plot neparāda kur ir vērtības un kur nav)
+if (!require("rasterVis")) install.packages("rasterVis")
+
+levelplot(LAD_raster_merge) #Redzu ka iedalījums ir ok. 
+
+#Atkal iztīru no nevajadzīgām lietam
+rm(list = ls())
+gc()
+```
+<br> 3.  Izmēģiniet {terra} funkcijas `resample()`, `aggregate()` un
+    `project()`, lai no iepirkšējā punktā sagatavotā rastra izveidotu
+    jaunu:
+<br> - ar 100m pikseļa malas garumu un atbilstību references slānim;
+```{r terra funkciju pārbaude ja aggregate fun ir max, echo=FALSE}
+if (!require("raster")) install.packages("raster")
+if (!require("terra")) install.packages("terra")
+
+rast_path <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster.tif"
+LAD_raster_10m <- rast(rast_path)
+
+#Agregēju, izmantoju "max" parametru.
+LAD_raster_100m <- aggregate(LAD_raster_10m, fact=10, cores = 13, fun = "max")
+
+#Saglabāju ar integer vērtībām
+writeRaster(LAD_raster_100m, "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster_100m_sum.tif", datatype = "INT1U", overwrite = TRUE)
+
+
+LAD_raster_100m_resample <- resample(LAD_raster_100m, LAD_raster_10m, method = "cubic")
+
+#1) Nezinu vai pareizi sapratu otro uzdevumu, bet izmantoju freq lai paskatītos lauka bloka īpatsvaru atšķirības abiem slāņiem. Sākumā aprēķinu tikai aggregate slānim.
+
+LAD_10m_freq <- freq(LAD_raster_10m)
+LAD_100m_freq <- freq(LAD_raster_100m)
+
+sum10m <- sum(LAD_10m_freq[, 3])
+sum100m <- sum(LAD_100m_freq[, 3])
+
+prop10m <- LAD_10m_freq[2, 3] / sum10m * 100
+prop100m <- LAD_100m_freq[2, 3] / sum100m * 100
+
+cat("10 metru izšķirtspējā aggregate slānim lauku bloku īpatsvars ir", round(prop10m, 1), "%\n", "bet 100 metru izšķirtspējā - ", round(prop100m, 1), "%.\n")
+
+#2) Paskatos vai resample ir kaut ko izmainījis
+rLAD_100m_freq <- freq(LAD_raster_100m_resample)
+
+rsum100m <- sum(rLAD_100m_freq[, 3])
+
+rprop100m <- rLAD_100m_freq[2, 3] / rsum100m * 100
+
+cat("100 metru izšķirtspējā tikai aggregate slānim lauku bloku īpatsvars ir", round(prop100m, 3), "%\n", "bet resample slānim - ", round(rprop100m, 3), "%.\n")
+
+#Rezultāts nav daudz pamainījies. Nerakstīšu ātruma pārbaudes skriptu, bet aggregate izpildās daudz ātrāk nekā resample. 
+
+#Atkal iztīru no nevajadzīgām lietam
+rm(list = ls())
+gc()
+```
+
+```{r terra funkciju pārbaude ja aggregate fun ir sum, echo=FALSE}
+if (!require("raster")) install.packages("raster")
+if (!require("terra")) install.packages("terra")
+
+rast_path <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster.tif"
+LAD_raster_10m <- rast(rast_path)
+
+#Agregēju, izmantoju sum parametru
+LAD_raster_100m <- aggregate(LAD_raster_10m, fact=10, cores = 13, fun = sum)
+
+#Saglabāju ar integer vērtībām
+writeRaster(LAD_raster_100m, "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster_100m_sum.tif", datatype = "INT1U", overwrite = TRUE)
+
+#Attēls
+if (!require("rasterVis")) install.packages("rasterVis")
+
+levelplot(LAD_raster_100m)
+
+#Ar sum sanāk ka katrā 100m šūnā ir saskaitīts cik lauku bloku 10 metrīgās šūnas (ar vērtību 1) ir tajā iekšā. 
+
+#Atkal iztīru no nevajadzīgām lietam
+rm(list = ls())
+gc()
+```
+<br> 4.  Izmantojot iepriekšējā punktā radīto 100m šūnas izmēra slāni,
+    sagatavojiet divus jaunus.
+<br> Sanāk šis jau ir izpildīts - vesela skaitļu fails ir ar aggregate fun=max iegūts slānis, un binārs kodējums saglabājas izmantojot fun=max parametru. Salīdzinu aizņemtās vietas. 
+```{r aizņemtās vietas pārbaude, echo=FALSE}
+
+LAD_raster_10m <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster.tif"
+
+LAD_raster_100m_proc <-  "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster_100m_max.tif"
+
+LAD_raster_100m_bin <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/LAD_raster_100m_sum.tif"
+
+
+file_info_10m <- file.info(LAD_raster_10m)
+file_info_100m_proc <- file.info(LAD_raster_100m_proc)
+file_info_100m_bin <- file.info(LAD_raster_100m_bin)
+
+file_size_10m <- file_info_10m$size / 1024
+file_size_100m_proc <- file_info_100m_proc$size / 1024
+file_size_100m_bin <- file_info_100m_bin$size / 1024
+
+cat("10m izšķirtspējas slānis ar bināro kodējumu ir", round(file_size_10m, 2), "KB liels \n")
+cat("100m izšķirtspējas slānis ar procentuālo kodējumu ir", round(file_size_100m_proc, 2), "KB liels \n")
+cat("100m izšķirtspējas slānis ar bināro kodējumu ir", round(file_size_100m_bin, 2), "KB liels \n")
+```
+    
+
+
+
+
+
