@@ -5,9 +5,9 @@ date: "2024. gada 31. decembris"
 output: github_document
 ---
 
-# 1. uzdevums 
+# 1. uzdevums
 
-Izmantojot 2651. nodaļas datus (nodala2651), salīdziniet ESRI shapefile, GeoPackage un geoparquet (ja vēlaties arī ESRI File Geodatabase, kuras uzrakstīšanai var nākties izmantot citu programmu) failu:
+Izmantojot 2651. nodaļas datus (nodala2651), salīdziniet ESRI shapefile, GeoPackage un geoparquet (ja vēlaties arī ESRI File Geodatabase, kuras uzrakstīšanai var nākties izmantot citu programmu) failu: 
 -   aizņemto diska vietu;
 -   ielasīšanas ātrumu vismaz 10 ielasīšanas izmēģinājumos.
 
@@ -62,7 +62,7 @@ Ja nepieciešams, pārskatām iegūto failu sarakstu `list.files(izpakosanas_cel
 
 Izveidosim mainīgo, kas satur absolūto ceļu līdz failam. Nolasīsim failu. Pakotne {sf} automātiski nolasīs visus ar shapefailu saistītos failus, kas atrodas tajā pašā mapē. Šis process notiek fonā, un nav jānorāda katra faila ceļš atsevišķi.
 
-```{r, reading shapefile, include = FALSE}
+```{r, reading shapefile, echo=TRUE, results='hide', warning = FALSE, message = FALSE}
 #Ja pakotne nav instsalēta: install.packages("sf")
 library(sf)
 
@@ -73,7 +73,7 @@ nod2651_shapefile <- st_read(shapefile_cels)
 
 Nolasīto shapefile pārveidosim GeoPackage un geoparquet formātos. Atsevišķos mainīgajos norādīsim ceļus uz katra faila vēlamo izvietošanas vietu, līdz ar to definējot arī faila nosaukumu.
 
-```{r, format conversion, message=FALSE, warning=FALSE}
+```{r, format conversion, echo=TRUE, results='hide', warning = FALSE, message = FALSE}
 #Ja pakotne nav instsalēta: install.packages("sfarrow")
 library(sfarrow)
 
@@ -128,7 +128,7 @@ rm(failu_info) #Izdzēst mainīgos, kas vairs nav nepieciešami.
 
 Veiksim 20 ielasīšanas mēģinājumus katram failam, rezultātus reģistrējot jaunā datu rāmī.
 
-```{r, speed measurements,include = FALSE}
+```{r, speed measurements, echo=TRUE, results='hide', warning = FALSE, message = FALSE}
 #Ja pakotne nav instsalēta: install.packages("microbenchmark")
 library(microbenchmark)
 
@@ -171,7 +171,9 @@ cat(sprintf("Faila veids: %s\n Min.: %.2f, Max.: %.2f, Vidējais: %.2f, Mēģin�
 
 **Secinājums**: Visātrāk tika atvērts *.parquet* fails.
 
-```{r, remove vriables from first task}
+```{r, remove files and vriables from first task, echo=TRUE, results='hide', warning = FALSE, message = FALSE}
+file.remove(geopackage_cels, geoparquet_cels) #izdzest liekus failus
+
 #Izdzēst mainīgos, kas vairs nav nepieciešami.
 rm(rezultati_ielasisanas_atrums, ielasisanas_atrums, nod2651_geopackage, nod2651_geoparquet,
    nod2651_shapefile, shapefile_cels, geopackage_cels, geoparquet_cels
@@ -208,7 +210,7 @@ shapefile_visi <- list.files(izpakosanas_cels, pattern = "\\.shp$", full.names =
 
 Pārveidosim shapefailus *.parquet* formātā un saglabāsim tos apakšdirektorijā.
 
-```{r, shape files to parquet, include = FALSE}
+```{r, shape files to parquet, echo=TRUE, results='hide', warning = FALSE, message = FALSE}
 for (katrs in shapefile_visi) {
   shapefile_dati <- st_read(katrs) #nolasīt šeipfailu
   # Izveidot parquet failu

@@ -3,7 +3,7 @@ Divpadsmitais uzdevums: sugas izplatības modelēšana
 
 ## Termiņš
 
-Līdz 2025-02-05, izmantojot
+Līdz ~~(2025-02-05)~~ **2025-02-24**, izmantojot
 [fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)
 un [pull
 request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
