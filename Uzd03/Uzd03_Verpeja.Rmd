@@ -1,0 +1,271 @@
+---
+title: "Trešais uzdevums: rastra dati, rasterizēšana un kodējumi"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Visu vajadzīgo funkciju instalēšana un ielāde
+```{r, message=FALSE, warning=FALSE}
+if(!require(archive)){
+    install.packages("archive")
+    library(archive)}
+if(!require(curl)){
+    install.packages("curl")
+    library(curl)}
+if(!require(sf)){
+    install.packages("sf")
+    library(sf)}
+if(!require(sfarrow)){ install.packages("sfarrow")
+library(sfarrow) }
+if(!require(httr)){
+    install.packages("httr")
+    library(httr)}
+if(!require(ows4R)){
+    install.packages("ows4R")
+    library(ows4R)}
+if(!require(sfarrow)){
+    install.packages("sfarrow")
+    library(sfarrow)}
+if(!require(terra)){
+    install.packages("terra")
+    library(terra)}
+if(!require(fasterize)){
+    install.packages("fasterize")
+    library(fasterize)}
+if(!require(dplyr)){
+    install.packages("dplyr")
+    library(dplyr)}
+if(!require(microbenchmark)){
+    install.packages("microbenchmark")
+    library(microbenchmark)}
+```
+
+#1. uzdevums
+1.1. References režģu lejuplāde - vektors un rastrs
+```{r}
+#vektors
+vektoru_url <- "https://zenodo.org/api/records/14277114/files-archive"
+vektoru <- "C:/Users/vinet/Documents/VPP/3uzd/vektoru.zip"
+curl_download(vektoru_url, destfile = vektoru)
+
+vektoru_vieta <- "C:/Users/vinet/Documents/VPP/3uzd/vektoru"
+archive_extract(vektoru, dir =vektoru_vieta)
+
+#rastrs
+rastru_url <- "https://zenodo.org/api/records/14497070/files-archive"
+rastrs <- "C:/Users/vinet/Documents/VPP/3uzd/rastrs.zip"
+curl_download(rastru_url, destfile = rastrs)
+
+rastrs_vieta <- "C:/Users/vinet/Documents/VPP/3uzd/rastrs"
+archive_extract(rastrs, dir =rastrs_vieta)
+```
+
+1.2. Mežu valsts reģistra centra datu geoparquet ielasīšana
+```{r, message=FALSE, warning=FALSE}
+centra_gpq_vieta <-"C:/Users/vinet/Documents/VPP/2uzd/centra.parquet_apv"
+centra_gpq <-st_read_parquet(centra_gpq_vieta, quiet = TRUE)
+```
+
+1.3. WFS slāņu informācijas iegūšana
+```{r, message=FALSE, warning=FALSE}
+wfs_link1 <- "https://karte.lad.gov.lv/arcgis/services/lauki/MapServer/WFSServer"
+wfs_url1 <- parse_url(wfs_link1)
+wfs_url1$query <- list(service = "wfs",
+                  request = "GetCapabilities")
+request <- build_url(wfs_url1)
+request
+#Pārbaudu koordinātu sistēmu, kādu output faila tipu un serviceversion atbalsta šis WFS. Pārliecinājos, ka atbalsta gml, kas ir standarts. Izmantojamā koordinātu sistēma šim WFS ir wgs
+
+bwk_client <- WFSClient$new(wfs_link1, 
+                            serviceVersion = "2.0.0")
+bwk_client$getFeatureTypes(pretty = TRUE)
+```
+
+1.4. Geoparquet failā esošo ģeometrijas datu robežu noteikšana un robežu pārveidošana uz WGS84 sistēmu. Tā kā mežu valsts reģistra centra dati bija LKS92 sistēmā, tad tos vajadzēja pārveidot, lai pareizi norādītu robežas tālākajās darbībās.
+```{r, message=FALSE, warning=FALSE}
+centra_robezas <- st_bbox(centra_gpq)
+centra_robezas_wgs <- st_transform(centra_robezas, crs = 4326)
+print(centra_robezas_wgs)
+```
+
+1.5. WFS datu lejupielāde un ielasīšana
+Tā kā nav sagaidāms, ka tuvākajā laikā tiks aktīvi rediģēti WFS pieejamie dati, tad WFS vispirms lejuplādēju uz datora. Tas aizņem vairāk atmiņu, taču nodrošina ātrāku datu apstrādi turpmāko darbību veikšanā.
+```{r, message=FALSE, warning=FALSE}
+wfs_link2 <- "https://karte.lad.gov.lv/arcgis/services/lauki/MapServer/WFSServer"
+wfs_url2 <- parse_url(wfs_link2)
+wfs_url2$query <- list(service = "WFS",
+                  
+                  request = "GetFeature",
+                  typename = "LAD:Lauki",
+                  bbox = "22.42279, 56.24303, 25.57287, 57.41234")
+request2 <- build_url(wfs_url2)
+
+
+centra_gml_vieta <- ("C:/Users/vinet/Documents/VPP/3uzd/centra.gml")
+invisible(GET(url = request2, 
+    write_disk(centra_gml_vieta, overwrite = TRUE)))
+centra_gml <- read_sf(centra_gml_vieta, quiet = TRUE)
+plot(centra_gml)
+
+rm(centra_gml_vieta, vektoru_url, vektoru, vektoru_vieta, rastrs, rastrs_vieta, rastru_url, centra_gpq_vieta, centra_gpq, wfs_link1, wfs_url1, wfs_link1, wfs_url1, request, request2, bwk_client, centra_robezas, centra_robezas_wgs)
+#Noņemu liekos objektus, lai dators vieglāk tiktu galā ar nākošajām darbībām
+```
+
+#2. uzdevums
+
+2.1. Gml faila pārveidošana atpakaļ par geoparquet failu, lai ātrāk veiktu nākošās darbības
+```{r, message=FALSE, warning=FALSE}
+LAD_centra_vieta <- "C:/Users/vinet/Documents/VPP/3uzd/LAD_centra.parquet"
+st_write_parquet(centra_gml, LAD_centra_vieta)
+LAD_centra <-st_read_parquet(LAD_centra_vieta, quiet = TRUE)
+```
+
+2.2. Rasterizācija
+```{r, message=FALSE, warning=FALSE}
+rastrs10m <- rast("C:/Users/vinet/Documents/VPP/3uzd/rastrs/LV10m_10km.tif")
+
+st_crs(LAD_centra)==st_crs(rastrs10m)
+#Pārliecinos, ka abiem failiem ir vienāda koordinātu sistēma izmantota
+
+mazs_rastrs10m <-terra::crop(rastrs10m,LAD_centra)
+r_10m <-raster::raster(mazs_rastrs10m)
+#Apgriežu rastru, lai mans dators spētu ar to darboties un pārvēršu par korekto rastra faila formātu
+
+LAD_centra$yes=1
+LAD_yes <-LAD_centra %>% 
+  dplyr::select(yes)
+centra10m <- fasterize(LAD_yes,r_10m, field="yes", background=0)
+centra10m <- mask(centra10m, r_10m)
+plot(centra10m)
+
+centra10m_vieta <- "C:/Users/vinet/Documents/VPP/3uzd/centra10m.tif"
+writeRaster(centra10m, filename=centra10m_vieta, format = "GTiff", overwrite = TRUE)
+
+rm(LAD_centra_vieta, LAD_centra, rastrs10m, mazs_rastrs10m, r_10m, centra10m, centra10m_vieta)
+#Noņemu liekos objektus, lai dators vieglāk tiktu galā ar nākošajām darbībām
+```
+
+#3.uzdevums
+
+3.1. Rastra 100m režģa sagatavošana
+```{r, message=FALSE, warning=FALSE}
+rastrs100m <- rast("C:/Users/vinet/Documents/VPP/3uzd/rastrs/LV100m_10km.tif")
+centra10m <- rast("C:/Users/vinet/Documents/VPP/3uzd/centra10m.tif")
+st_crs(rastrs100m)==st_crs(centra10m)
+st_crs(rastrs100m)
+st_crs(centra10m)
+#Pārbaudu vai ir vienāda kooridnātu sistēma. Režģa rastram ir LKS92, taču centra datu rastram ir atšķirīga.
+```
+
+3.2.Jaunā rastra izveide 3 variantos un ātruma noteikšana katrai funkcijai
+
+Resample - pārnes datus no viena rastra uz otru, kuriem nesakrīt izšķirtspēja vai pakotne, ar ko tā izveidota (raster un spatraster faili).
+Aggregate - uztaisa jaunu rastru ar zemāku izšķirtspēju nekā oriģinālajam failam. Jānorāda cik šūnas sapludināt kopā ar funkciju fact.
+Project - nomaina koordinātu sistēmu SpatRaster failam. Cik sapratu, ja kā references koordinātu sistēmu ieliek citu SpatRaster failu, nevis norāda konkrētu koordinātu sistēmu, tad tas nomaina arī izšķirtspēju (šajā gadījumā 10m -> 100m).
+
+Kā jauno šūnu vērtības iegūšanas metodi izvēlos "sum", kas tad arī norādīs LAD lauku īpatsvaru.
+```{r, message=FALSE, warning=FALSE}
+
+atrums_koord_maina <- microbenchmark( centra10m_lks <- project(centra10m,"EPSG:3059"),times = 3)
+atruma_salidz <- microbenchmark(
+  centra100m_r <- resample(centra10m_lks, rastrs100m, method="sum"),
+  centra100m_a <- aggregate(centra10m, fact=10, fun="sum"),
+  centra100m_p <- project(centra10m, rastrs100m, method="sum"), times = 3)
+summary(atrums_koord_maina)
+summary(atruma_salidz)
+
+plot(centra100m_a)
+#pārbaudu kā izskatās
+```
+Visātrāk jauno rastru izdevās izveidot ar aggregate funkciju. Otra ātrākā metode bija resample. Ja abi rastra faili ir ar vienādu koordinātu sistēmu, tad ātrumu atspoguļo centra100m_r, taču, ja atšķirīgas un vispirms jāveic koordinātu sistēmas maiņa, tad centra100m_lks+centra100m_r. Funkcija project bija vislēnākā.
+
+#4. uzdevums
+
+1) Iepriekš uztaisītais centra100m_a jau ir aprēķinājis LAD lauku īpatsvaru. Tā kā tika pāriets no 10x10 uz 100x100 izšķirtsspēju, tad esošās vērtības jau būs tie paši procenti un jaunu failu taisīt nav vajadzība.
+
+4.1. Jau 3.uzd uztaisītā faila saglabāšana uz datora
+```{r, message=FALSE, warning=FALSE}
+writeRaster(centra100m_a, "C:/Users/vinet/Documents/VPP/3uzd/centra100m_proc.tif", overwrite = TRUE)
+```
+
+4.2. Jauna rastra izveide 100m izšķirtspējā, kur tikai vērtības 1 vai 0 šūnās, un tā saglabāšana uz datora
+```{r, message=FALSE, warning=FALSE}
+centra100m_bin <- aggregate(centra10m, fact=10, fun="max")
+plot(centra100m_bin)
+#Pārbaudu kā izskatās, vai viss veiksmīgi izdevās
+
+writeRaster(centra100m_bin, "C:/Users/vinet/Documents/VPP/3uzd/centra100m_bin.tif", overwrite = TRUE)
+```
+
+4.3.Kā mainās faila izmērs uz cietā diska, atkarībā no rastra šūnas izmēra?
+```{r, message=FALSE, warning=FALSE}
+centra10m_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra10m.tif")
+centra10m_izmers <-centra10m_info$size / (1024^2)
+centra100m_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra100m_proc.tif")
+centra100m_izmers <-centra100m_info$size / (1024^2)
+cat("10x10m izšķirtspējas faila vieta MB:", centra10m_izmers, "\n")
+cat("100x100m izšķirtspējas faila vieta MB:", centra100m_izmers)
+```
+Fails ar lielākām šūnām (100x100m) aizņem daudz mazāk vietas datorā. Tas diezgan loģiski, jo uz to pašu teritoriju ir mazāk šūnas vajadzīgas, ja ir mazāka izškirtspēja.
+
+
+
+4.4. Kā mainās faila izmērs uz cietā diska, atkarībā no tajā ietvertās informācijas?
+```{r, message=FALSE, warning=FALSE}
+centra100m_bin_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra100m_bin.tif")
+centra100m_bin_izmers <-centra100m_bin_info$size / (1024^2)
+
+cat("Bināras informācijas faila vieta MB:", centra100m_bin_izmers, "\n")
+cat("Procentuālas informācijas faila vieta MB:", centra100m_izmers)
+```
+Ja informācija tiek uzglabāta kā bināras vērtības, tad šāds fails aizņem nedaudz mazāk vietas, nekā saglabājot informāciju izteiktu procentos. Izmēra atšķirības gan ir ļoti minimālas - 5MB.
+
+4.5. Kāds kodējums (joslas tips) aizņem vismazāko apjomu uz cietā diska, saglabājot informāciju?
+Ir dažādi informācijas kodējumi. Tie parasti sastāv no 5 rakstzīmēm, piemēram, LOG1S, INT1S, INT1U, INT2S, INT2U u.c.
+Pirmie 3 burti norāda vērtības tipu, 4. rakstīme norāda kodēto baitu skaitu un vai skaitļi ir tikai pozitīvi (U), vai var būt arī negatīvi (S). Mana hipotēze būtu, ka ar lielāku bitu skaitu, fails aizņems vairāk vietas. Tāpat līdzīgi varētu būt - ja ir kodētas gan negatīvas, gan pozitīvas vērtības vai ja tiek pieņemti arī daļskaitļi, tad arī fails aizņems vairāk vietas. 
+```{r}
+#Baitu skaita ietekmes pārbaude
+writeRaster(centra10m, "C:/Users/vinet/Documents/VPP/3uzd/centra10_INT1U.tif", datatype="INT1U", overwrite=TRUE)
+writeRaster(centra10m, "C:/Users/vinet/Documents/VPP/3uzd/centra10_INT2U.tif", datatype="INT2U", overwrite=TRUE)
+
+centra10_INT1U_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra10_INT1U.tif")
+centra10_INT1U_izmers <-centra10_INT1U_info$size / (1024^2)
+centra10_INT2U_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra10_INT2U.tif")
+centra10_INT2U_izmers <-centra10_INT2U_info$size / (1024^2)
+
+cat("Ar INT1U kodējumu faila izmērs MB:", centra10_INT1U_izmers, "\n")
+cat("Ar INT2U kodējumu faila izmērs MB MB:", centra10_INT2U_izmers)
+```
+Ar lielāku baitu skaitu tiešām fails aizņem vairāk vietu. Failu izmēra atšķirības gan ir ļoti mazas (2MB), vismaz apskatītajā gadījumā.
+
+```{r}
+#S vai U kodējuma ietekmes pārbaude
+writeRaster(centra10m, "C:/Users/vinet/Documents/VPP/3uzd/centra10_INT1S.tif", datatype="INT1S", overwrite=TRUE)
+
+centra10_INT1S_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra10_INT1S.tif")
+centra10_INT1S_izmers <-centra10_INT1S_info$size / (1024^2)
+
+cat("Ar INT1U kodējumu faila izmērs MB:", centra10_INT1U_izmers, "\n")
+cat("Ar INT1S kodējumu faila izmērs MB MB:", centra10_INT1S_izmers)
+```
+Ka ir kodētas gan negatīvas, gan pozitīvas vērtības (S) fails aizņem gandrīz identiski daudz vietas datorā nekā U, taču U aizņem minimāli mazāk vietas.
+
+```{r}
+#Veselu skaitļi vai decimālskaitļu kodējuma ietekmes pārbaude
+writeRaster(centra10m, "C:/Users/vinet/Documents/VPP/3uzd/centra10_FLT4S.tif", datatype="FLT4S", overwrite=TRUE)
+writeRaster(centra10m, "C:/Users/vinet/Documents/VPP/3uzd/centra10_INT4S.tif", datatype="INT4S", overwrite=TRUE)
+
+centra10_FLT4S_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra10_FLT4S.tif")
+centra10_FLT4S_izmers <-centra10_FLT4S_info$size / (1024^2)
+centra10_INT4S_info <- file.info("C:/Users/vinet/Documents/VPP/3uzd/centra10_INT4S.tif")
+centra10_INT4S_izmers <-centra10_INT4S_info$size / (1024^2)
+
+cat("Ar FLT4S kodējumu faila izmērs MB:", centra10_FLT4S_izmers, "\n")
+cat("Ar INT4S kodējumu faila izmērs MB MB:", centra10_INT4S_izmers)
+```
+Saglabājot failu INT kodējumā (tikai veseli skaitļi) aizņem gandrīz tikpat daudz vietas kā FLT (kodē arī decimālskatiļus), taču INT aizņem minimāli mazāk vietas.
+
+4.uzd.secinājums: ar INT1U no testētajiem kodējumiem fails aizņēma vismazāk vietas.
