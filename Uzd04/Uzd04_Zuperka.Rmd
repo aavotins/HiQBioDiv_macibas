@@ -1,0 +1,209 @@
+---
+title: "Uzd04_Zuperka"
+output: github_document
+date: "2025-01-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+<br> Iepriekš biju izdzēsis nevajadzīgos shp failus, tos lejupielādēju un pārtaisu uz parquet formātu un izdzēšu shp formātu. Tālāk nav vajadzīga tāpēc vienu reizi izpildu un uzlieku eval=FALSE. 
+```{r pārveidoju otrā uzdevuma shp uz parquet, echo=FALSE, eval=FALSE}
+
+if (!require("sf")) install.packages("sf")
+if (!require("sfarrow")) install.packages("sfarrow")
+
+MVR_path <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd02"
+
+MVR_shapefiles <- list.files(MVR_path, pattern = "\\.shp$", full.names = TRUE)
+
+#Izveidoju funkciju
+Convert_function <- function(MVR_shapefiles, MVR_path) {
+  
+    #Ielasu
+    sf_file <- st_read(shapefile)
+  
+    #Norādu saglabāšanas vietu un nosaukumu
+    Parquet_output <- paste0(MVR_path, "/", sub("\\.shp$", ".parquet", basename(shapefile)))
+  
+    #Konvertēju uz geoparquet
+    st_write_parquet(sf_file, Parquet_output)
+}
+
+#Izpildu funkciju katram shapefile
+for (shapefile in MVR_shapefiles) { #Definēju for ciklu katram shapefile
+  Convert_function(shapefile, MVR_path) 
+} 
+
+```
+<br> Izmantošu mana funkcija lai apstradātu apvienoto centra mežniecības failu.
+```{r izpildu mana_funkcija apvienotajam failam, echo=FALSE}
+if (!require("dplyr")) install.packages("dplyr")
+if (!require("arrow")) install.packages("arrow")
+if (!require("sf")) install.packages("sf")
+if (!require("terra")) install.packages("terra")
+if (!require("tools")) install.packages("tools")
+
+sf_file_path <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd02/Combined_centrs.parquet"
+sf_file_st <- st_as_sf(arrow::read_parquet(sf_file_path))
+
+output_dir <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd04"
+
+Latvia_raster_ref <- rast("C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_raster_reference_grids/LV10m_10km.tif")
+Latvia_raster_100m_ref <- rast("C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd03/HiQBioDiv_raster_reference_grids/LV100m_10km.tif")
+
+Latvia_raster <- terra::subst(Latvia_raster_ref, 1, 0) #Nomainu vērtības no 1 uz 0, atstāju NA
+
+Latvia_raster_ref_packed <- terra::wrap(Latvia_raster) #Šis vajadzīgs lai palaistu ar doParallel, jo sapratu 
+Latvia_raster_100m_ref_packed <- terra::wrap(Latvia_raster_100m_ref)
+
+Start_time_apv <- Sys.time()
+
+mana_funkcija <- function(sf_file_st, Latvia_raster) {
+    
+    sf_file <- terra::vect(filter(sf_file_st, s10 == 1)) #Filtrēju tikai priežu mežus
+    
+    priedes_10x10 <- terra::rasterize(sf_file, Latvia_raster, fun = max)
+    priedes_10x10 <- terra::cover(priedes_10x10, Latvia_raster) #Savienoju ar references rastru 
+    
+    priedes_100m_prop <- aggregate(priedes_10x10, fact = 10, fun = sum) #Sum lai iegūtu cik šūnas ir ar vērtībām
+    priedes_100m_prop <- priedes_100m_prop / 100 #Iegūstu proporcionālo platību
+    priedes_100m_prop <- terra::project(priedes_100m_prop, Latvia_raster_100m_ref, align_only=TRUE) #Nodrošinu ka sakrīt ar references rastru
+    
+    file_name <- paste0(output_dir, "/", tools::file_path_sans_ext(basename(sf_file_path)), ".tif")
+    terra::writeRaster(priedes_100m_prop, file_name, datatype = "FLT4S", overwrite = TRUE)
+}
+
+priedes_100m_prop <- mana_funkcija(sf_file_st, Latvia_raster)
+
+End_time_apv <- Sys.time()
+
+Starpiba_apvienotais_fails <- difftime(End_time_apv, Start_time_apv, units = "mins")
+
+cat("Centra mežniecības apvienotā faila apstrādes laiks:", round(Starpiba_apvienotais_fails,1), "minūtes \n")
+
+plot(priedes_100m_prop) #Pārbaudu vai ieguvu ko vajag
+
+```
+<br>Iepriekš izmantoju fasterize, kas bija ilgi un ļoti nestabili attiecībā uz RAM (izmantošana visu laiku lēkāja no 7-8 GB līdz pat 23 GB un visu Latviju skaitļoja gandrīz 2 stundas). Terra rasterize izmanto daudz mazāk resursus (īpaši RAM) un visu izdara ļoti ātri. Abas funkcijas izmantoja 5 kodolus pastāvīgi. 
+<br>Tālāk pārbaudīšu šo pašu funkciju uz katras nodaļas parquet atsevišķi. Sākumā uzrakstu funkciju datu ielasīšanai.
+```{r ielasu nodaļu datus ar ielasīšanas funkciju, echo=FALSE}
+
+#Ielasu datus
+
+if (!require("sf")) install.packages("sf")
+if (!require("arrow")) install.packages("arrow")
+if (!require("tidyverse")) install.packages("tidyverse")
+
+MVR_path <- "C:/Users/mark7/Documents/MZ_HiQBioDiv_macibas/Uzd02"
+
+MVR_parquets <- list.files(MVR_path, pattern = "\\.parquet$", full.names = TRUE) %>% stringr::str_subset( "Combined_centrs.parquet", negate = TRUE)  #Izfiltrēju Centrs_combined, atrodas tajā pašā mapē
+
+#Izveidoju funkciju katra faila ielasīšanai
+
+#Izvelku faila nosaukumus
+MVR_filenames <- list.files(MVR_path, pattern = "\\.parquet$", full.names = FALSE) %>% stringr::str_subset( "Combined_centrs.parquet", negate = TRUE) #Izfiltrēju Centrs_combined, atrodas tajā pašā mapē
+
+#Veidoju ielasīšanas funkciju
+read_function <- function(parquet_file) {
+
+  parquet_data <- read_parquet(parquet_file)
+  
+  sf_object <- st_as_sf(parquet_data)
+  return(sf_object)
+}
+
+#Izveidoju for loop katram parquet failam 
+for (i in seq_along(MVR_parquets)) {
+  parquet_file <- MVR_parquets[i] #Izdalu i failus no kopas
+  
+  filename <- MVR_filenames[i] #Piešķiru i-ajam failam nosaukumu
+  
+  read_function(parquet_file) #Izpildu funkciju 
+}
+```
+<br> Pielietošu mana_funkcija katram parquet failam ar for un izvadīšu izpildes laiku.
+```{r izpildu mana_funkcija katram failam atsevišķi, echo=FALSE}
+Start_time_atseviski <- Sys.time()
+
+lapply(MVR_parquets, function(parquet_file) {
+  sf_file <- st_as_sf(arrow::read_parquet(parquet_file)) 
+  
+  mana_funkcija(sf_file, Latvia_raster)
+  
+  terra::writeRaster(priedes_100m_prop, parquet_file, datatype = "FLT4S", overwrite = TRUE)
+})
+
+End_time_atseviski <- Sys.time()
+Starpiba_atseviski <- difftime(End_time_atseviski, Start_time_atseviski, units = "mins")
+
+cat("Kopējais failu apstrādes laiks atsevišķi:", round(Starpiba_atseviski,1), "minūtes.\n")
+
+```
+<br> Izpildes laiks 5 atsevišķiem failiem ir daudz lielāks nekā vienam apvienotajam failam. RAM izmanto līdzīgi. Kodolus ar - pārsvarā 5 kodoli.
+<br> CIzmantošu foreach funkciju ar vienu kodolu un izpildīšu funkciju katram failam atsevišķi. doParallel un terra ļoti dīvaini iet kopā - dažreiz kods izpildās kā vajag un kļūdu nemet, bet citās reizēs izmet `Error: external pointer is not valid`. Uzlieku error=TRUE, jo izskatās ka faili tiek izveidoti un saglabāti. 
+```{r izpildu mana_funkcija ar doParallel un vienu CPU kodolu, echo=FALSE, error=TRUE}
+if (!require("doParallel")) install.packages("doParallel")
+
+cluster <- makeCluster(1)
+registerDoParallel(cluster)
+
+Start_time_atseviski_foreach <- Sys.time()
+
+
+foreach(i = seq_along(MVR_parquets), .packages = c("dplyr", "arrow", "sf", "terra")) %dopar% {
+  
+
+  Latvia_raster_ref <- terra::unwrap(Latvia_raster_ref_packed)
+  Latvia_raster_100m_ref <- terra::unwrap(Latvia_raster_100m_ref_packed)
+  
+  sf_file_path <- MVR_parquets[i]
+  sf_file_st <- st_as_sf(arrow::read_parquet(sf_file_path))
+  
+  mana_funkcija(sf_file_st, Latvia_raster_ref)
+}
+
+
+stopCluster(cluster)
+
+End_time_atseviski_foreach <- Sys.time()
+Starpiba_atseviski_foreach <- difftime(End_time_atseviski_foreach, Start_time_atseviski_foreach, units = "mins")
+
+cat("Kopējais izpildes laiks atsevišķi ar doParallel un 1 kodolu:", round(Starpiba_atseviski_foreach, 1), "min.\n")
+```
+<br> foreach izmantošana ar vienu kodolu aizņem gandrīz tikpat ilgi cik iterējot ar lapply funkciju. Aizņemtais RAM tāds pats. 
+<br><br> Pārbaudīšu mana_funkcija ar 5 kodoliem. Izpildās ātri, 1.9 minūtēs. Tā pati problēma kas ar 1 kodolu, bet atkal izskatās ka faili tiek izveidoti un ir lasāmi.  
+```{r izpildu mana_funkcija ar doParallel un 5 kodoliem, echo=FALSE, error=TRUE}
+if (!require("doParallel")) install.packages("doParallel")
+
+cluster <- makeCluster(5)
+registerDoParallel(cluster)
+
+Start_time_atseviski_foreach_5 <- Sys.time()
+
+
+foreach(i = seq_along(MVR_parquets), .packages = c("dplyr", "arrow", "sf", "terra")) %dopar% {
+  
+
+  Latvia_raster_ref <- terra::unwrap(Latvia_raster_ref_packed)
+  Latvia_raster_100m_ref <- terra::unwrap(Latvia_raster_100m_ref_packed)
+  
+
+  sf_file_path <- MVR_parquets[i]
+  sf_file_st <- st_as_sf(arrow::read_parquet(sf_file_path))
+  
+
+  mana_funkcija(sf_file_st, Latvia_raster_ref)
+}
+
+
+stopCluster(cluster)
+
+End_time_atseviski_foreach_5 <- Sys.time()
+Starpiba_atseviski_foreach_5 <- difftime(End_time_atseviski_foreach_5, Start_time_atseviski_foreach_5, units = "mins")
+
+cat("Kopējais izpildes laiks atsevišķi ar doParallel un 5 kodoliem:", round(Starpiba_atseviski_foreach_5, 1), "min.\n")
+```
+<br> Šeit gan biju nonācis pie pārpildīta RAM, bet laika ziņā izskatās ka izpildījās tikpat ātri cik apstrādājot apvienoto failu. 
+<br>Dīvaini ka terra izmantošana doParallel ir ļoti nestabila - dažbrīd funkcija izpildās un kļūdu nav, bet citas reizes izmet kļūdu Error: External pointer is not valid. Vienīgais kas izskatās šajā situācijā palīdz ir pēc iepr. izpildes izdzēst esošos mazos failus. 
+<br> Jebkurā gadījumā pēc saviem novērojumiem secinu, ka šajā gadījumā ātrākais un stabilākais risinājums ir izpildīt funkciju apvienotajam failam bāzes R implementācijā. Ar 5 kodoliem atsevišķu mazāku failu apstrāde arī ir ok variants.
