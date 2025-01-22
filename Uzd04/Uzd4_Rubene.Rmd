@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Darbam nepieciešamās pakotnes
 
-```{r, message = FALSE, error = FALSE}
+```{r, message = FALSE, warning=FALSE}
 library(tidyverse)
 library(terra)
 library(sf)
@@ -41,7 +41,7 @@ Funkcija secīgi:
  - saglabā iepriekšējā punktā izveidoto slāni (ar 100 m izšķirtspēju) kā GeoTIFF failu ar relatīvo ceļu norādītā vietā cietajā diskā, pieņemot ievades faila nosaukumu.
  
  
-Ieteiktajos avotos lasīju, ka vieglāk ir sākumā uzrakstīt komandrindas un pēc tam tās savietot strādājošā funkcijā nevis uzreiz censties rakstīt funkciju.
+Ieteiktajos avotos lasīju, ka vieglāk ir sākumā uzrakstīt komandrindas un pēc tam tās savietot strādājošā funkcijā nevis uzreiz rakstīt funkciju.
 
 Atlasu, kurās mežaudzēs valdošā suga ir priedes (pēc pirmā stāva pirmās sugas, kolonna s10 = "1")
 
@@ -51,34 +51,79 @@ priezu_mezi <- centra_mezi %>% filter(s10 == 1)
 
 10 m rastra sagatavošana, kurā priežu mežaudzes no iepriekšējā punkta ir apzīmētas ar 1, pārējās Latvijas sauzsemes teritorijā esošās šūnas apzīmētas ar 0 un pārējās šūnas ir NA atbilstoši references slānim
 
-```{r}
+```{r, message = FALSE}
 # ref10m_cropped <- crop(ref10m, centra_mezi)
-priezu_mezi_10m <- rasterize(priezu_mezi,ref10m)
-priezu_mezi_10m <- classify(priezu_mezi_10m, cbind(NA, 0)) 
-LAD_lauki_10m[is.na(ref10m)]
-plot(priezu_mezi_10m)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
 ```
-Iepriekšējā punkta rastru pārveido uz 100 m šūnu, aprēķinot priežu mežaudžu platības īpatsvaru (no kopējās platības) ik 100 m šūnā
+Iepriekšējā punkta rastru pārveido uz 100 m šūnu, aprēķinot priežu mežaudžu platības īpatsvaru (no kopējās platības) ik 100 m šūnā un uzreiz saglabāju rezultātu
  
 ```{r}
 priezu_mezi_100m <- priezu_mezi_10m %>%
     aggregate(fact = 10, fun = sum) %>%
-    resample(ref100m, method = "near")
-plot(priezu_mezi_100m)
+    resample(ref100m, method = "near", filename = "../centra_mezi/priezu_mezi_100m.tif", overwrite = TRUE)
 ```
  
-Saglabā iepriekšējā punktā izveidoto slāni (ar 100 m izšķirtspēju) kā GeoTIFF failu ar relatīvo ceļu norādītā vietā cietajā diskā, pieņemot ievades faila nosaukumu.
- 
+
+Tagad tas viss jāsavieto funkcijā
+
 ```{r}
-writeRaster(priezu_mezi_100m, "../centra_mezi/priezu_mezi_100m.tif")
+rm(centra_mezi, ref10m, ref100m, priezu_mezi, priezu_mezi_10m, priezu_mezi_100m) 
 ```
 
+References slāņi vienmēr būs nemainīgi tāpēc ielasu tos ārpus funkcijas, lai tā neielasa failus no jauna katru reizi atkārtojot funkciju, kā arī failu saglabāšanas vieta vienmēr būs tā pati
 
-Tagad tas viss jāsavieto funkcijā...
-Funkcijai ir 3 ievades faili - centra_mezi, ref10m un ref100m
+```{r}
+ref10m <- rast(("../ref_rastri/LV10m_10km.tif"))
+ref100m <- rast(("../ref_rastri/LV100m_10km.tif"))
+vieta <- "../centra_mezi"
+```
+ 
+Funkcija:
  
 ```{r}
-mana_funkcija <- function(x,y,z) {}
+mana_funkcija <- function(mezs_dati,koku_suga) {
+sakums <- Sys.time()
+mezi <- st_read_parquet(mezs_dati)
+faila_nos <- tools::file_path_sans_ext(basename(mezs_dati))
+fails <- file.path(vieta, paste0(faila_nos, ".tif"))
+priezu_mezi <- mezi %>% filter(s10 == koku_suga)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
+priezu_mezi_100m <- priezu_mezi_10m %>%
+    aggregate(fact = 10, fun = sum) %>%
+    resample(ref100m, method = "near", filename = fails, overwrite = TRUE)
+beigas <- Sys.time()
+return(list(start = sakums, end = beigas))
+}
 ```
+
+Izmēģinu ar centra mežu datiem:
+
+```{r}
+centra_mezi <- mana_funkcija(
+  mezs_dati = "../centra_mezi/centra_mezi_labots.parquet",
+  koku_suga = 1
+)
+```
+
+Vai funkcija dara to, ko es vēlos, lai tā darītu? Paskatīšos vizuāli uz rezultātu
+
+```{r, warning = FALSE}
+rezultats <- rast("../centra_mezi/centra_mezi_labots.tif")
+plot(rezultats) # šķiet, ka viss labi
+
+laiks <- centra_mezi$end - centra_mezi$start
+print(laiks)
+```
+
+Tātad šī darbība aizņēma aptuveni divarpus minūtes. Mulsina laiks, jo skatos, ka citiem process gājis ilgāk - vai kaut kas ir nepareizi?
+
+
+
+
+
+
+
 
 
