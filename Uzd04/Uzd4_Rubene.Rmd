@@ -73,14 +73,6 @@ Tagad tas viss jāsavieto funkcijā
 #bet vispirms noņemu visus objektus, lai vairu sākt ar tīru darba vidi
 rm(centra_mezi, ref10m, ref100m, priezu_mezi, priezu_mezi_10m, priezu_mezi_100m) 
 ```
-
-References slāņi vienmēr būs nemainīgi, tāpēc ielasu tos ārpus funkcijas, lai tā neielasa failus no jauna katru reizi atkārtojot funkciju, kā arī failu saglabāšanas vieta vienmēr būs tā pati
-
-```{r}
-ref10m <- rast(("../ref_rastri/LV10m_10km.tif"))
-ref100m <- rast(("../ref_rastri/LV100m_10km.tif"))
-vieta <- "../centra_mezi"
-```
  
 Funkcija:
  
@@ -114,7 +106,7 @@ print(uzd2)
 
 Šī darbība aizņēma aptuveni 3,5 minūtes.
 
-Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni 6,7 GB pastāvīgi ap 6,5 GBties resource monitor, maksimāli novēroju 10 CPU (man likās, ka manam datoram ir astoņi kodoli? Laikam neesmu sapratusi kādas terminoloģijas nianses), lielākoties tas svārstījās no 5-8
+Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni 6,3 GB pastāvīgi ap 5,8 GB, pirms procesa uzsākšanas ap 5,4 GB. Skatoties resource monitor, maksimāli novēroju 10 CPU (šķiet, ka vēl neesmu sapratusi kādas terminoloģijas nianses), lielākoties tas svārstījās no 6-9
 
 Vai funkcija dara to, kas bija paredzēts? Paskatīšos vizuāli uz rezultātu
 
@@ -139,7 +131,7 @@ Izveidoju funkciju, kura pārvērš visus shapefile parquet formātā un to piel
 fun_parquet <- function(mezs_dati){
 meza_fails <- st_read(mezs_dati, quiet = TRUE)
 faila_nos <- tools::file_path_sans_ext(basename(mezs_dati))
-fails <- file.path(vieta, paste0(faila_nos, ".parquet"))
+fails <- file.path("../centra_mezi", paste0(faila_nos, ".parquet"))
 st_write_parquet(meza_fails,fails)
 }
 
@@ -161,9 +153,9 @@ uzd3 <- system.time(
 print(uzd3)
 ```
 
-Darbība aizņēma 576,33 sekundes jeb aptuveni 10 minūtes. Operatīvā atmiņa pietika, viss līdzīgi, kā iepriekš - maksimāli tika izmantoti aptuveni 7,2 GB, bet lielākoties ap 6,5 GB . Maksimāli novēroju 10 CPU, lielākoties svārstījās no 6-9
+Darbība aizņēma krietni ilgāku laiku - aptuveni 15 minūtes. Operatīvā atmiņa pietika, viss līdzīgi kā iepriekš - maksimāli tika izmantoti aptuveni 6,3 GB, bet lielākoties ap 5,8 GB . Maksimāli novēroju 10 CPU, lielākoties svārstījās no 6-9
 
-# 4) Iepriekšējā uzdevuma atkārtošana, izmantojot {doParallel} un {foreach} (šis man nestrādāja (diskusija #43), bet te vēl atstāju visādas lietas, ko mēģināju darīt)
+# 4) Iepriekšējā uzdevuma atkārtošana, izmantojot {doParallel} un {foreach}
 
 Vispirms jānosaka klāsteris kā tieši vienu CPU kodolu liels
 
@@ -181,91 +173,14 @@ uzd4 <- system.time(
   foreach(mezi = MVRnodalas_par, 
           .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
             mana_funkcija(mezs_dati = mezi, koku_suga = 1)})
-# Error in { : task 1 failed - "NULL value passed as symbol address"
 
-
-# Andra ieteiktais variants #1
-uzd4_2 <- foreach(mezi = seq_along(MVRnodalas_par), 
-          .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
-            print(mezi)}
-# atgriež sarakstu ar skaitļiem no 1-5
-
-
-# Andra ieteiktais variants #2 ar funkcijas definēšanu pašā ciklā
-uzd4_3 <- foreach(mezi = MVRnodalas_par, 
-          .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
-            mana_funkcija <- function(mezs_dati,koku_suga) {
-sakums <- Sys.time()
-mezi <- st_read_parquet(mezs_dati)
-faila_nos <- tools::file_path_sans_ext(basename(mezs_dati))
-fails <- file.path(vieta, paste0(faila_nos, ".tif"))
-priezu_mezi <- mezi %>% filter(s10 == koku_suga)
-priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
-priezu_mezi_10m[is.na(ref10m)] <- NA
-priezu_mezi_100m <- priezu_mezi_10m %>%
-    aggregate(fact = 10, fun = sum) %>%
-    resample(ref100m, method = "near", filename = fails, overwrite = TRUE)
-beigas <- Sys.time()
-return(list(start = sakums, end = beigas))
-            }
-            mana_funkcija(mezs_dati = mezi, koku_suga = 1)}
-# tas pats kļūdas paziņojums kas uzd4_1
-
-uzd4_4 <- foreach(mezi = seq_along(MVRnodalas_par), 
-          .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
-            mana_funkcija(mezs_dati = mezi, koku_suga = 1)}
-
-
-#stopCluster(cluster)
+stopCluster(cluster)
 
 ```
 
-```{r}
-# Chat GPT ieteiktās lietas
+Darbība aizņēma ilgāk - aptuveni 26 minūtes. Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni 7 GB, bet lielākoties ap 6,5 GB. Maksimāli novēroju 8 CPU, lielākoties svārstījās no 3-6.
 
-# 1) Export necessary variables to workers
-clusterExport(cl, c("vieta", "ref10m", "ref100m", "mana_funkcija")) #nepalīdzēja
-
-
-# 2) If the error persists, the problem might lie in how st_read_parquet processes mezs_dati. The error "NULL value passed as symbol address" can happen if:
-
-# mezs_dati is not a valid file path, or the file cannot be read for any reason (e.g., corruption, permissions).
-# Fix: Add a debug print inside the loop to verify the input:
-
-mana_funkcija2 <- function(mezs_dati, koku_suga) {
-  print(paste("Processing file:", mezs_dati))  # Debugging
-  sakums <- Sys.time()
-  
-  if (!file.exists(mezs_dati)) stop(paste("File does not exist:", mezs_dati))
-  
-  mezi <- st_read_parquet(mezs_dati) # Try reading the file
-  faila_nos <- tools::file_path_sans_ext(basename(mezs_dati))
-  fails <- file.path(vieta, paste0(faila_nos, ".tif"))
-  
-  priezu_mezi <- mezi %>% filter(s10 == koku_suga)
-  priezu_mezi_10m <- rasterize(priezu_mezi, ref10m, background = 0)
-  priezu_mezi_10m[is.na(ref10m)] <- NA
-  priezu_mezi_100m <- priezu_mezi_10m %>%
-    aggregate(fact = 10, fun = sum) %>%
-    resample(ref100m, method = "near", filename = fails, overwrite = TRUE)
-  
-  beigas <- Sys.time()
-  return(list(start = sakums, end = beigas))
-}
-
-results <- list()
-for (mezi in MVRnodalas_par) {
-  print(paste("Processing:", mezi))
-  results[[mezi]] <- mana_funkcija2(mezs_dati = mezi, koku_suga = 1)
-}
-# Viss nostrādāja
-# If this works without issues, then the problem is specific to the parallel execution setup.
-
-```
-
-Darbība aizņēma xx sekundes jeb aptuveni x minūtes. Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni x GB, bet lielākoties ap x GB . Maksimāli novēroju x CPU, lielākoties svārstījās no x
-
-# 5) Uzdevuma atkārtošana ar diviem CPU kodoliem (pagaidām nestrādā)
+# 5) Uzdevuma atkārtošana ar diviem CPU kodoliem 
 
 ```{r, cache = TRUE}
 cluster2 <- makeCluster(2)
@@ -275,10 +190,9 @@ uzd5 <- system.time({
   foreach(mezi = MVRnodalas_par, 
           .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
             mana_funkcija(mezs_dati = mezi, koku_suga = 1)}})
+print(uzd5)
 
 stopCluster(cluster2)
 ```
 
-Darbība aizņēma x sekundes jeb aptuveni x minūtes. Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni x GB, bet lielākoties ap x GB . Maksimāli novēroju x CPU, lielākoties svārstījās no x
-
-
+Darbība aizņēma aptuveni 18 minūtes - tātad krietni mazāk nekā iepriekšējā. Operatīvā atmiņa pietika, līdzīgi kā iepriekš, maksimāli tika izmantoti aptuveni 7 GB, bet lielākoties ap 6,5 GB. Maksimāli novēroju 8 CPU, lielākoties svārstījās no 4-7
