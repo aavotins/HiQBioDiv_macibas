@@ -18,6 +18,8 @@ library(tidyverse)
 library(terra)
 library(sf)
 library(sfarrow)
+library(foreach)
+library(doParallel)
 ```
 
 Uzdevuma veikšanai nepieciešami Centra virsmežniecības dati, kā arī references rastri 10 un 100 m izšķirtspējā
@@ -30,7 +32,7 @@ ref100m <- rast(("../ref_rastri/LV100m_10km.tif"))
 
 # 1) Funkcijas izveide
 
-Funkcija secīgi:
+Jāizveido tāda funkcija, kura secīgi:
 
  - no piedāvātā MVR faila atlasa mežaudzes, kurās valdošā koku suga ir priede (sugas kods ir “1”);
 
@@ -51,27 +53,28 @@ priezu_mezi <- centra_mezi %>% filter(s10 == 1)
 
 10 m rastra sagatavošana, kurā priežu mežaudzes no iepriekšējā punkta ir apzīmētas ar 1, pārējās Latvijas sauzsemes teritorijā esošās šūnas apzīmētas ar 0 un pārējās šūnas ir NA atbilstoši references slānim
 
-```{r, message = FALSE}
+```{r, results='hide', warning = FALSE, message = FALSE}
 # ref10m_cropped <- crop(ref10m, centra_mezi)
 priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
 priezu_mezi_10m[is.na(ref10m)] <- NA
 ```
+
 Iepriekšējā punkta rastru pārveido uz 100 m šūnu, aprēķinot priežu mežaudžu platības īpatsvaru (no kopējās platības) ik 100 m šūnā un uzreiz saglabāju rezultātu
  
-```{r}
+```{r, results='hide', warning = FALSE, message = FALSE}
 priezu_mezi_100m <- priezu_mezi_10m %>%
     aggregate(fact = 10, fun = sum) %>%
     resample(ref100m, method = "near", filename = "../centra_mezi/priezu_mezi_100m.tif", overwrite = TRUE)
 ```
  
-
 Tagad tas viss jāsavieto funkcijā
 
 ```{r}
+#bet vispirms noņemu visus objektus, lai vairu sākt ar tīru darba vidi
 rm(centra_mezi, ref10m, ref100m, priezu_mezi, priezu_mezi_10m, priezu_mezi_100m) 
 ```
 
-References slāņi vienmēr būs nemainīgi tāpēc ielasu tos ārpus funkcijas, lai tā neielasa failus no jauna katru reizi atkārtojot funkciju, kā arī failu saglabāšanas vieta vienmēr būs tā pati
+References slāņi vienmēr būs nemainīgi, tāpēc ielasu tos ārpus funkcijas, lai tā neielasa failus no jauna katru reizi atkārtojot funkciju, kā arī failu saglabāšanas vieta vienmēr būs tā pati
 
 ```{r}
 ref10m <- rast(("../ref_rastri/LV10m_10km.tif"))
@@ -107,7 +110,7 @@ centra_mezi <- mana_funkcija(
 )
 ```
 
-Vai funkcija dara to, ko es vēlos, lai tā darītu? Paskatīšos vizuāli uz rezultātu
+Vai funkcija dara to, kas bija paredzēts? Vismaz paskatīšos vizuāli uz rezultātu
 
 ```{r, warning = FALSE}
 rezultats <- rast("../centra_mezi/centra_mezi_labots.tif")
@@ -117,13 +120,160 @@ laiks <- centra_mezi$end - centra_mezi$start
 print(laiks)
 ```
 
-Tātad šī darbība aizņēma aptuveni divarpus minūtes. Mulsina laiks, jo skatos, ka citiem process gājis ilgāk - vai kaut kas ir nepareizi?
+Šī darbība aizņēma aptuveni 3 minūtes.
+
+Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni 6,8 GB. Skatoties resource monitor maksimāli novēroju 9 CPU (man likās, ka manam datoram ir astoņi kodoli? Laikam neesmu sapratusi kādas nianses), lielākoties tas svārstījās no 3-6
 
 
+# 3) Funkcjas pielietošana ciklā 
+
+Vispirms jāpārveido nodaļu faili geoparquet formātā, jo iepriekš izveidoju tikai parquet failu visām nodaļām kopā. To arī darīšu ar ciklu
+
+Sākumā izveidošu sarakstu ar shapefile nosaukumiem, kas atrodami lejupielādētajā mapē
+
+```{r}
+MVRnodalas_shp <- list.files("../centra_mezi", pattern = "\\.shp$", full.names = TRUE)
+```
+
+Izveidoju funkciju, kura pārvērš visus shapefile parquet formātā un to pielietoju ciklā
+
+```{r, warning = FALSE, , cache = TRUE}
+fun_parquet <- function(mezs_dati){
+meza_fails <- st_read(mezs_dati, quiet = TRUE)
+faila_nos <- tools::file_path_sans_ext(basename(mezs_dati))
+fails <- file.path(vieta, paste0(faila_nos, ".parquet"))
+st_write_parquet(meza_fails,fails)
+}
+
+for (file in MVRnodalas_shp) {
+  fun_parquet(file)
+}
+```
+
+Pielietoju iepriekš izveidoto funkciju (mana_funkcija) ciklā
+
+```{r, , cache = TRUE}
+MVRnodalas_par <- list.files("../centra_mezi", pattern = "^nodala\\d{4}\\.parquet$", full.names = TRUE)
+print(MVRnodalas_par)
+
+uzd3 <- system.time(
+  for (file in MVRnodalas_par) {
+  result <- mana_funkcija(mezs_dati = file, koku_suga = 1)
+  })
+print(uzd3)
+```
+
+Darbība aizņēma 576,33 sekundes jeb aptuveni 10 minūtes. Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni 7,4 GB, bet lielākoties ap 6,8 GB . Maksimāli novēroju 8 CPU, lielākoties svārstījās no 3-6
+
+# 4) Iepriekšējā uzdevuma atkārtošana, izmantojot {doParallel} un {foreach} (šis man nestrādāja (diskusija #43), bet te vēl atstāju visādas lietas, ko mēģināju darīt)
+
+Vispirms jānosaka klāsteris kā tieši vienu CPU kodolu liels
+
+```{r}
+cluster <- makeCluster(1)
+registerDoParallel(cluster)
+```
+
+Izmantošu {foreach} ciklu
+
+```{r, cache = TRUE}
+# sākotnējais variants, kurš nenostrādāja
+uzd4_1 <- foreach(mezi = MVRnodalas_par, 
+          .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
+            mana_funkcija(mezs_dati = mezi, koku_suga = 1)}
+# Error in { : task 1 failed - "NULL value passed as symbol address"
 
 
+# Andra ieteiktais variants #1
+uzd4_2 <- foreach(mezi = seq_along(MVRnodalas_par), 
+          .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
+            print(mezi)}
+# atgriež sarakstu ar skaitļiem no 1-5
 
 
+# Andra ieteiktais variants #2 ar funkcijas definēšanu pašā ciklā
+uzd4_3 <- foreach(mezi = MVRnodalas_par, 
+          .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
+            mana_funkcija <- function(mezs_dati,koku_suga) {
+sakums <- Sys.time()
+mezi <- st_read_parquet(mezs_dati)
+faila_nos <- tools::file_path_sans_ext(basename(mezs_dati))
+fails <- file.path(vieta, paste0(faila_nos, ".tif"))
+priezu_mezi <- mezi %>% filter(s10 == koku_suga)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
+priezu_mezi_100m <- priezu_mezi_10m %>%
+    aggregate(fact = 10, fun = sum) %>%
+    resample(ref100m, method = "near", filename = fails, overwrite = TRUE)
+beigas <- Sys.time()
+return(list(start = sakums, end = beigas))
+            }
+            mana_funkcija(mezs_dati = mezi, koku_suga = 1)}
+# tas pats kļūdas paziņojums kas uzd4_1
 
+#stopCluster(cluster)
+
+```
+
+```{r}
+# Chat GPT ieteiktās lietas
+
+# 1) Export necessary variables to workers
+clusterExport(cl, c("vieta", "ref10m", "ref100m", "mana_funkcija")) #nepalīdzēja
+
+
+# 2) If the error persists, the problem might lie in how st_read_parquet processes mezs_dati. The error "NULL value passed as symbol address" can happen if:
+
+# mezs_dati is not a valid file path, or the file cannot be read for any reason (e.g., corruption, permissions).
+# Fix: Add a debug print inside the loop to verify the input:
+
+mana_funkcija2 <- function(mezs_dati, koku_suga) {
+  print(paste("Processing file:", mezs_dati))  # Debugging
+  sakums <- Sys.time()
+  
+  if (!file.exists(mezs_dati)) stop(paste("File does not exist:", mezs_dati))
+  
+  mezi <- st_read_parquet(mezs_dati) # Try reading the file
+  faila_nos <- tools::file_path_sans_ext(basename(mezs_dati))
+  fails <- file.path(vieta, paste0(faila_nos, ".tif"))
+  
+  priezu_mezi <- mezi %>% filter(s10 == koku_suga)
+  priezu_mezi_10m <- rasterize(priezu_mezi, ref10m, background = 0)
+  priezu_mezi_10m[is.na(ref10m)] <- NA
+  priezu_mezi_100m <- priezu_mezi_10m %>%
+    aggregate(fact = 10, fun = sum) %>%
+    resample(ref100m, method = "near", filename = fails, overwrite = TRUE)
+  
+  beigas <- Sys.time()
+  return(list(start = sakums, end = beigas))
+}
+
+results <- list()
+for (mezi in MVRnodalas_par) {
+  print(paste("Processing:", mezi))
+  results[[mezi]] <- mana_funkcija2(mezs_dati = mezi, koku_suga = 1)
+}
+# Viss nostrādāja
+# If this works without issues, then the problem is specific to the parallel execution setup.
+
+```
+
+Darbība aizņēma xx sekundes jeb aptuveni x minūtes. Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni x GB, bet lielākoties ap x GB . Maksimāli novēroju x CPU, lielākoties svārstījās no x
+
+# 5) Uzdevuma atkārtošana ar diviem CPU kodoliem (pagaidām nestrādā)
+
+```{r, cache = TRUE}
+cluster2 <- makeCluster(2)
+registerDoParallel(cluster2)
+
+uzd5 <- system.time({
+  foreach(mezi = MVRnodalas_par, 
+          .packages = c("tidyverse","sfarrow","sf","terra")) %dopar% {
+            mana_funkcija(mezs_dati = mezi, koku_suga = 1)}})
+
+stopCluster(cluster2)
+```
+
+Darbība aizņēma x sekundes jeb aptuveni x minūtes. Operatīvā atmiņa pietika, maksimāli tika izmantoti aptuveni x GB, bet lielākoties ap x GB . Maksimāli novēroju x CPU, lielākoties svārstījās no x
 
 
