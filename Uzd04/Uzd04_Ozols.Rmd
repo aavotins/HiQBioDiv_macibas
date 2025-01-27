@@ -1,0 +1,149 @@
+---
+title: "Uzd04_Ozols"
+author: "Janis Ozols"
+date: "2025-01-17"
+output:  rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04")
+getwd()
+```
+## Uzdevums
+Uzdevuma veikšanai nepieciešami Valsts meža dienesta Meža Valsts reģistra (MVR)
+Centra virsmežniecības dati no atvērto datu portāla, kas izmantoti 
+[otrajā uzdevumā](./Uzd02/Uzdevums02.md).
+1. Sagatavojiet funkciju ar nosaukumu `mana_funkcija`, kura (secīgi):
+
+  - no piedāvātā MVR faila atlasa mežaudzes, kurās valdošā koku suga ir priede 
+  (sugas kods ir "1");
+  
+  - sagatavo tādu rastru 10 m izšķirtspējā visai valsts teritorijai, kurā priežu 
+  mežaudzes no iepriekšējā punkta ir apzīmētas ar `1`, pārējās Latvijas sauzsemes 
+  teritorijā esošās šūnas apzīmētas ar `0` un pārējās šūnas ir `NA`, un tas atbilst
+  [projekta *Zenodo* repozitorijā](https://zenodo.org/communities/hiqbiodiv/records?q=&l=list&p=1&s=10&sort=newest) 
+  ievietotajam [references slānim](https://zenodo.org/records/14497070) `LV10m_10km.tif`;
+  
+  - iepriekšējā punkta rastru pārveido uz 100 m šūnu, aprēķinot priežu mežaudžu 
+  platības īpatsvaru (no kopējās platības) ik 100 m šūnā, nodrošinot atbilstību 
+  [projekta *Zenodo* repozitorijā](https://zenodo.org/communities/hiqbiodiv/records?q=&l=list&p=1&s=10&sort=newest) 
+  ievietotajam [references slānim](https://zenodo.org/records/14497070) `LV100m_10km.tif`;
+  
+  - saglabā iepriekšējā punktā izveidoto slāni (ar 100 m izšķirtspēju) kā GeoTIFF 
+  failu ar relatīvo ceļu norādītā vietā cietajā diskā, pieņemot ievades faila nosaukumu.
+
+Izveidojam funkcijas loģiku, lai saprastu, kuras daļas atkārtojas un kuras ir nemainīgas.
+mana funkcija = ielasa failu, no ievadītā faila atlasa koku sugu, sagatavo rastru 10m izšķirtspējā, kurā izvēlētā dominantā koka mežaudzes ir apzīmētas ar viens, pārējās sauszemes teritorijas apzīmē ar 0 un pārējās šūnas ar na, atbilst 10m references slānim, pārveido uz 100m šūnu, aprēķinot izvēlētās koku sugas mežaudžu platības īpatsvaru no kopējās platības ik 100m šūnā, nodrošina atbilstību 100m references slānim, saglabā izveidoto slāni, kā geotif slāni, iedodot tam izvades faila nosaukumu tajā ietverot saglabāšanas direktoriju. Atkāpos no punkta, ka izveido failu ar ievades faila nosaukumu, jo gribēju izveidot funkciju, kurai var mainīt valdošo koku sugu kā argumentu, attiecīgi no viena ievades faila izveidojot atšķirīgus izvades failus.
+Sadalam, kuras darbības ir argumenti un, kuras ir funkcijas ķermenis. 
+Argumenti: ielasītais fails, izvēlētā koku suga, faila nosaukums
+Funkcijas loģika sagatavota, sagatavojam darba vidi un nepieciešamos failus.
+```{r, packages,warning=FALSE,message=FALSE}
+library(dplyr)
+library(sf)
+library(arrow)
+library(sfarrow)
+library(raster)
+library(fasterize)
+library(tools)
+library(doParallel)
+library(foreach)
+```
+Izveidojam funkciju
+```{r,funckija}
+mana_funkcija <- function(ievades_fails,koku_suga,faila_nosaukums) {
+  starts <- Sys.time()
+  mvr_fails <- st_read_parquet(ievades_fails)
+  mezaudze <- mvr_fails %>%
+    filter(s10 == {koku_suga})
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  writeRaster(rastrs_mezaudze_100m, faila_nosaukums, format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+}
+```
+Pārbaudam vai funkcija darbojas
+```{r,funkcija_darbojas}
+funkcija_darbojas <- mana_funkcija(ievades_fails = "C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04\\mezicentrs.parquet",koku_suga = 1,faila_nosaukums = "priezu_mezaudzes.tif")
+```
+Paskatamies kādu rezultātu iegūst nomainot valdošo sugu
+```{r,funkcija_egles}
+funkcija_egles <- mana_funkcija(ievades_fails = "C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04\\mezicentrs.parquet",koku_suga = 3,faila_nosaukums = "eglu_mezaudzes.tif")
+```
+#2. Sagatavoto funkciju mana_funkcija izmēģiniet otrajā uzdevumā sagatavotajam gqoparquet failam, kurā ir apvienotas visas Centrālās virsmežniecības nodaļas. Cik daudz laika aizņem šis uzdevums? Cik CPU kodolus tas aizņem periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas uzdevuma veikšanai, kādu tās apjomu R izmantoja?
+```{r,laiks}
+system.time(mana_funkcija(ievades_fails = "C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04\\mezicentrs.parquet",koku_suga = 1,faila_nosaukums = "priezu_mezaudzes.tif"))
+```
+Atbilde: Uzdevums aizņēma ~10 min, aizņēma 1 CPU kodolu, operatīvā atmiņa pietika, maksimums tika izmantoti 28gb.
+#3. Sagatavojiet katras nodaļas MVR datus atsevišķā geoparquet failā, kura nosaukums satur nodaļas nosaukumu. Iteratīva procesa, piemēram, for cikla, veidā, ieviesiet sagatavoto funkciju katrai nodaļai atsevišķi. Cik daudz laika aizņem šis uzdevums? Cik CPU kodolus tas aizņem periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas uzdevuma veikšanai, kādu tās apjomu R izmantoja?
+```{r, mvr_nodalas,warning=FALSE,message=FALSE}
+mvr_nodalas <- list.files("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd02\\centra_virsmezniecibas_dati",pattern = "\\.shp$")
+dir.create(path="C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04\\nodalas_parqueti")
+mvr_nodalas
+parquet <- function(ievades_fails,direktorija) {
+  fails <- st_read(ievades_fails)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(direktorija,paste0(ievades_nosaukums, ".parquet"))
+  st_write_parquet(fails,izvades_fails)
+}
+direktorija <- "C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04\\nodalas_parqueti"
+sapply(mvr_nodalas,parquet,direktorija=direktorija)
+```
+```{r,nodala_list}
+nodalas <- list.files("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04\\nodalas_parqueti",pattern = "\\.parquet$")
+nodalas
+```
+Lai funkciju darbinātu uz failu sarakstu, nepieciešams, lai funkcija atgriež ievades faila nosaukumu, tāpēc modoficējam sākotnējo izveidoto funkciju un nosaucam to par mana_funkcija2
+```{r,funckija2}
+mana_funkcija2 <- function(ievades_fails,direktorija) {
+  starts <- Sys.time()
+  mvr_fails <- st_read_parquet(ievades_fails)
+  mezaudze <- mvr_fails %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(direktorija,ievades_nosaukums, ".parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+}
+```
+
+```{r,iterativais_process}
+system.time(sapply(nodalas,mana_funkcija2,direktorija=direktorija))
+```
+Atbilde: Uzdevums aizņēma ~ 64 min, patstāvīgi aizņēma 1 CPU kodolu, R izmantoja 32gb operatīvās atmiņas
+#4. Atkārtojiet iepriekšējo uzdevumu, izmantojot {doParallel} un {foreach}, bet nosakiet klāseteri kā tieši vienu CPU kodolu lielu. Cik daudz laika aizņem šis uzdevums? Cik CPU kodolus tas aizņem periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas uzdevuma veikšanai, kādu tās apjomu R izmantoja?
+```{r,cluster}
+cluster1 <- makeCluster(1) 
+registerDoParallel(cluster1)
+laiks1 <- system.time({
+  foreach(nodala = nodalas,.packages = c("sfarrow", "raster", "fasterize", "dplyr", "tools")) %dopar% {
+    mana_funkcija2(nodala,direktorija)
+    }
+})
+stopCluster(cluster1)
+print(laiks1)
+```
+Atbilde: Strādāja uz 12 logical procesoriem, ilga ~68 minūtes, izmantoja 28 gb operatīvās atmiņas.
+#5. Atkārtojiet iepriekšējo uzdevumu paralēli uz vismaz diviem CPU kodoliem. Cik daudz laika aizņem šis uzdevums? Cik CPU kodolus tas aizņem periodiski, cik - patstāvīgi? Vai pietika oeratīvās atmiņas uzdevuma veikšanai, kādu tās apjomu R izmantoja?
+```{r,cluster2}
+cluster2 <- makeCluster(2) 
+registerDoParallel(cluster2)
+laiks2 <- system.time({
+  foreach(nodala = nodalas,.packages = c("sfarrow", "raster", "fasterize", "dplyr", "tools")) %dopar% {
+    mana_funkcija2(nodala,direktorija)
+    }
+})
+stopCluster(cluster2)
+print(laiks2)
+```
+Atbilde: Strādāja uz 6 kodoliem, 12 logical procesoriem, ilga ~36 minūtes, izmantoja 26 gb operatīvās atmiņas.

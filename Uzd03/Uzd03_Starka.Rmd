@@ -1,0 +1,382 @@
+---
+title: "Uzd03_Starka"
+author: "Rūta Starka"
+date: "2025-01-18"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Datu lejupielāde, atpakošana un ielasīšana
+Vispirms lejupielādēju un atpakoju visus nepieciešamos slāņus no HiQBioDiv repozitorija. 
+Izlaižu references vektordatu lejupielādi un atpakošanu (tikai renderēšanas ātruma dēļ), jo šī uzdevuma veikšanai tas nav nepieciešams. Bet to esmu tos lejupilādējusi, kā pierādījums aiz #komandrindas. 
+
+```{r ielasisana, message=FALSE,cache=TRUE}
+getwd()
+library(curl)
+library(archive)
+
+#References vektordati
+#saite_vektordati = "https://zenodo.org/api/records/14277114/files-archive"
+#dir_vektordati = "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_vektordati.zip"
+#curl_download(saite_vektordati, destfile = dir_vektordati)
+#archive_extract(dir_vektordati, dir = "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_vektordati")
+
+#References rastra dati
+saite_rastrs = "https://zenodo.org/api/records/14497070/files-archive"
+dir_rastrs = "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_rastrs.zip"
+curl_download(saite_rastrs, destfile = dir_rastrs)
+archive_extract(dir_rastrs, dir = "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_rastrs")
+
+rm(saite_vektordati,dir_vektordati,saite_rastrs,dir_rastrs)
+
+```
+
+## Piekļuve LAD datiem
+
+Pievienojos LAD wfs serverim. 
+Izveidoju klientu un apskatu kādi dati pieejami serverī. 
+Redzu, ka datos ir tikai viens slānis "Lauki".
+
+```{r LAD dati, cache=TRUE}
+#Lauku atbalsta dienesta WFS serveris
+library(httr)
+library(ows4R)# ja nepieciešams install.packages("ows4R")
+
+saite_LAD = "https://karte.lad.gov.lv/arcgis/services/lauki/MapServer/WFSServer"#jāpalaiž
+url = parse_url(saite_LAD)
+url$query <- list(service = "wfs",
+                  version = "2.0.0",
+                  request = "GetCapabilities")
+request <- build_url(url)
+request#šo saiti var apskatīt pārlūkā
+
+RR_client <- WFSClient$new(saite_LAD, 
+                            serviceVersion = "2.0.0")
+
+library(tidyverse)
+RR_client$getFeatureTypes() %>% map_chr(function(x){x$getTitle()})
+
+```
+
+## Sasaiste ar centra virsmežniecību 
+Ņemot vērā, ka būs jādarbojas tikai ar datiem, kas ietilps MVR Centra virsmežniecībā, tad nepieciešams ielasīt tā datus, kas jau sagatavoti iepriekš.
+Ar funkciju st_crs() pārliecinos par šī slāņa koordinātu sistēmu. Pēdējā rindā redzu, ka koordinātu sistēmas ID ir EPSG 3059, kas ir LKS-92 (kas ir likumā noteiktā koordinātu sistēma, tāpēc citādi nemaz nevajadzētu būt).
+Vienlaicīgi arī iespējams redzēt šo datu telpiskās robežas, bet lai šo informāciju izmantotu, lai ierobežotu uz šo pašu teritoriju arī LAD datus, tad papildus izpildu funkciju st_bbox(), kas sesijā saglabā šīs robežas kā vērtības.
+
+```{r MVR dati,message=FALSE, cache=TRUE}
+library(sfarrow)
+library(sf)
+
+MVR_centrs = st_read_parquet("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/centrs_kopa2.parquet")
+
+st_crs(MVR_centrs)
+
+MVR_robezas = st_bbox(MVR_centrs)
+MVR_robezu_koord=paste(MVR_robezas["xmin"], MVR_robezas["ymin"], MVR_robezas["xmax"], MVR_robezas["ymax"], sep = ",")
+rm(MVR_robezas)
+
+```
+
+## LAD datu iegūšana
+Tagad nepieciešams lejupielādēt LAD datus, kas limitēti uz centra virsmežniecības robežām un saglabāt tos geoparquet formātā tālākām darbībām uz diska.
+Redzu, ka ielasītajam LAD datu fragments satur informāciju par 3000 objektiem, par katru ir 12 lauki ar dažādu informāciju. 
+
+```{r LAD daļas lejupielāde, warning=FALSE, cache=TRUE}
+LAD = parse_url(saite_LAD)
+LAD$query = list(
+  service = "WFS",
+  request = "GetFeature",
+  bbox = MVR_robezu_koord,
+  srsName = "EPSG:3059",
+  typename = "Lauki")
+
+request2 = build_url(LAD)
+LAD_dati = st_read(request2)
+
+st_write_parquet(LAD_dati, dsn="LAD_centrs.parquet")
+LAD_centrs=st_read_parquet(("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_centrs.parquet"))
+
+```
+
+Apskatu abu interesējošo slāņu sakritību. Redzu, ka nepieciešams vēlreiz apgriezt LAD datus, lai tie precīzi atbilstu centra virsmežniecības robežām, ne tikai virsmežniecības kartes extent. 
+Izmēģināju st_intersection, kas atlasīja 854 LAD poligonus, bet tas bija aizdomīgi, tāpēc izpētot sīkāk sapratu, ka atlasās tikai tie LAD lauki, kas pieskaras mežiem, kas galīgi nav vajadzīgais rezultāts.
+Tāpēc pieņēmu lēmumu abortēt šo ideju un turpināt. 
+
+```{r slāņu sakritība, warning=FALSE, echo=TRUE, cache=TRUE}
+ggplot() +
+  geom_sf(data=MVR_centrs, color = "green") +
+  geom_sf(data=LAD_centrs, color = "yellow")
+
+LAD_centrs_inter=st_intersection(LAD_centrs, MVR_centrs)
+LAD_centrs2=LAD_centrs_inter%>%select(1:12)
+ggplot() +
+  geom_sf(data=MVR_centrs, color = "green") +
+  geom_sf(data=LAD_centrs, color = "yellow")+
+  geom_sf(data=LAD_centrs2, color = "red")
+
+rm(LAD_centrs_inter,LAD_centrs2)
+
+```
+
+Redzu, ka līdzīgi kā 2. uzd, arī LAD datos ir multipolygon ģeometrijas, tāpēc ar tādu pašu pieeju kā iepriekš pārbaudu, vai visas ir korektas. Aizvācu izveidoto datu tabulu ģeometriju pārbaudei.
+```{r LAD ģeometriju pārbaude, include=FALSE}
+st_is_valid(LAD_centrs)
+v=data.frame(geom_val=st_is_valid(LAD_centrs$SHAPE, reason=TRUE))
+sort(unique(v$geom_val))
+
+rm(v)
+```
+
+
+Tagad tālāk darbs tikai ar lejupielādētiem datiem, tāpēc no R vides aizvācu arī visu pārējo, kas vairs nebūs nepieciešams 
+```{r tirisana1}
+rm(request2,LAD, LAD_dati,saite_LAD, RR_client, url, request, MVR_robezu_koord, MVR_centrs)
+
+```
+
+# 2. Rasterizēšana 
+## references rastrs
+Lai ielasītos LAD datus rasterizētu, vispirms nepieciešams 10m references rastrs. 
+Ielasu un pārliecinos par koordinātu sistēmu. 
+Tad apgriežu rastru atbilstoši ielasīto LAD datu robežām un aizvācu rastru par visu Latviju, lai atbrīvotu vietu. 
+Visbeidzot, grafiski paskatos, kā apgriezās. Redzu, ka nav izdevies kā vēlējos, rastrs apgriežas tikai līdz kartes robežām, nevis ap ģeometriju robežām.
+Šo varētu risināt kaut kā, bet eju tālāk.
+P.S. vēl mēģināju pirms rasterizācijas apgriezt references rastru līdz MVR_centrs, nevis LAD_centrs, ar domu, ka tad neizbēgami rasterizācija notiks tikai nepieciešamajās robežās, bet tas radīja problēmas tālākajā rasterizēšanas solī, tā arī nesapratu kāpēc. 
+(LAD_rastrs=rasterize(LAD_centrs,ref_rastrs10m_MVRcentrs) #Error: external pointer is not valid ).
+
+```{r references rastra ielasisana, echo=TRUE, cache=TRUE}
+library(terra)
+ref_rastrs10m=rast("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_rastrs/LV10m_10km.tif")
+st_crs(ref_rastrs10m) # EPSG 3059, tātad viss kārtībā, koordinātu sistēmas sakrīt.
+
+ref_rastrs10m_LADam = terra::crop(ref_rastrs10m,LAD_centrs)
+rm(ref_rastrs10m)
+plot(ref_rastrs10m_LADam)
+
+```
+
+## rasterizēšana
+
+Sākumā nepieciešams references rastru no terra objekta pārvērst par rester objektu, lai varētu darboties ar funkciju fasterize(). Tad rasterizēju LAD vektordatus, norādot, lai viss, kas nepārklājas ar LAD laukiem tiek pašlaik klasificēts kā 0.
+Novācu lieko LAD vektordatu slāni.
+
+```{r LAD rasterizācija, cache=TRUE}
+library(raster) #ja nepieciešams install.packages("raster")
+ref_rastrs2=raster::raster(ref_rastrs10m_LADam)
+
+library(fasterize) # ja nepieciešams, install.packages("fasterize")
+LAD_rastrs=fasterize(LAD_centrs,ref_rastrs2,background=0) 
+rm(LAD_centrs)
+```
+
+Tagad jāpārbauda, kas sanācis. Pārbaudīšu vizuāli. Redzu, ka jebkas cits, kas nav LAD lauki ir NA. Tomēr vēlamais rezultāts ir rastrs, kurā ir vērtība "1", ja šūnā ir LAD lauki, vērtība "0", ja šūnā nav LAD lauki , un vērtība "NA", ja šūna atrodas ārpus Latvijas tetitorijas.
+
+```{r pirmā rastra vizualizēšana, warning=FALSE, echo=TRUE}
+plot(LAD_rastrs)
+```
+
+Tātad jāklasificē NA vērtības divās daļās. Tam varētu izmantot references rastru, jo to vizualizējot iepriekš (chunk "references rastra ielasisana") bija redzams, ka tukšas (NA) ir šūnas ārpus Latvijas. 
+Noteikšu, ka ja references rastrā tās ir NA, tad arī šajā rastrā tās jādefinē kā NA. 
+Par cik ar <RasterLayer> šādi neļauj izrīkoties, sākumā to pārvēršu uz <SpatRaster> objektu ar nosaukumu LAD_rastrs2. 
+```{r rastra vērtību klasificēšana, warning=FALSE}
+LAD_rastrs2=rast(LAD_rastrs)
+LAD_rastrs2[is.na(ref_rastrs10m_LADam)] = NA 
+
+```
+
+Apskatu rezultātu grafiski un secinu, ka viss ir sanācis.
+```{r rastrs pēc klasifikācijas, echo=TRUE}
+plot(LAD_rastrs2)
+```
+
+Tagad saglabāju kā GeoTIFF slāni bez kompresijas. Aizvācu liekos references slāņus.
+
+```{r rastra eksports,warning=FALSE}
+terra::writeRaster(LAD_rastrs2, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs.tif", gdal=c("COMPRESS=DEFLATE", "TFW=YES"),overwrite=TRUE)
+rm(ref_rastrs10m_LADam,ref_rastrs2)
+```
+
+
+# 3. Rastri ar 100m pikseļa malas garumu
+## references rastrs
+Tagad lai no iepirkšējā punktā sagatavotā rastra izveidotu jaunu rastru, kam pikseļa malas garums ir 100m pašreizējo 10m vietā, sākumā jāielasa un līdz LAD_rastrs robežām jāapgriež atbilsosais references slānis. 
+
+```{r, 100m references rastrs}
+ref_rastrs100m=rast("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_rastrs/LV100m_10km.tif")
+st_crs(ref_rastrs100m) # LKS-92, protams.
+
+ref_rastrs100m_LADam = terra::crop(ref_rastrs100m,LAD_rastrs)
+rm(ref_rastrs100m)
+plot(ref_rastrs100m_LADam)
+```
+## funkciju ātruma salīdzināšana
+Tagad pārbaudīšu ar kuru no funkcijām ātrāk iet rastra transformēšana no 10m rastra par rastru ar 100m malas garumu. bet man nepatīk, ka ne aggregate(), ne project() funkcijās nav iepsējams to piesaistīt references rastram, respektīvi, iespējams varētu gadīties kādas nevēlamas nobīdes. Vismaz project() ir nedaudz labāks, jo var piesaistīt koordinātu sistēmai, kas varētu šādu varbūtību mazināt. 
+
+```{r rastra izšķirtspējas pārveidošanas ātrumi ar dažādām funkcijām}
+library(microbenchmark)#install.packages("microbenchmark"), ja nepieciešams
+resample_a=data.frame(microbenchmark(resample(LAD_rastrs2,ref_rastrs100m_LADam),times=5))
+aggregate_a=data.frame(microbenchmark(aggregate(LAD_rastrs2,fact=10,fun=all),times=5))
+project_a=data.frame(microbenchmark(project(LAD_rastrs2, "EPSG:3059"),times=5))
+atrumi=rbind.data.frame(resample_a,aggregate_a,project_a)
+atrumi$sek=atrumi$time/1e+09
+plot(atrumi$sek)
+
+ggplot(atrumi, aes(expr, sek)) + geom_boxplot()+ 
+      labs(x = "Formāts", y = "Ielasīšanas ātrums (sekundes)")+
+  scale_x_discrete(labels=c('resample()', 'aggregate()', 'project()'))
+
+```
+Secinu, ka ātrāk šo darbiņu paveic aggregate(), bet tālāk darbojos tikai ar funkciju resample(), jo tā rada lielāku uzticību. Novācu liekos objektus. 
+
+```{r tirisana2}
+rm(resample_a,aggregate_a,project_a, atrumi)
+```
+
+Jāpaskatās vizuāli uz rastriem, kas rodas no šīm funkcijām.
+
+```{r}
+resample_rastrs=resample(LAD_rastrs2,ref_rastrs100m_LADam)
+aggregate_rastrs=aggregate(LAD_rastrs2,fact=10,fun=all)
+project_rastrs=project(LAD_rastrs2, "EPSG:3059")
+
+plot(resample_rastrs)#te nedaudz aizdomīgi ir tas, ka pikseļos nav diskrētas vērtības. Tas nozīmē, ka pēc noklusējuma pikseļu vērības laikam tiek saskaitītas.
+plot(aggregate_rastrs)#te viss izskatās normāli
+plot(project_rastrs)#te arī viss normāli
+
+```
+## LAD platību īpatsvari
+Tagad ar tām pašām funkcijām jāpamēģina iegūt platību, kurās ir lauka bloki, īpatsvaru.
+Izmantošu terra::freq, kas parāda vērību biežumu. Aprēķinu īpatsvaru kā daļu no kopējā pikseļu skaita. Rezultāts ir pikseļu skaita īpatsvars (nav faktiskā lauku platība ha).
+
+```{r LAD platību īpatsvari ar dažādām funkcijām}
+library(tidyverse)
+res_freq=freq(resample_rastrs)
+agr_freq=freq(aggregate_rastrs)
+proj_freq=freq(project_rastrs)
+
+data.frame(rastraFunkcija=c('resample', 'aggregate', 'project'),
+          Īpatsvars_proc=
+            c(res_freq$count[2]/(res_freq$count[2] + res_freq$count[1])*100,
+              agr_freq$count[2]/(agr_freq$count[2] + agr_freq$count[1])*100,
+              proj_freq$count[2]/(proj_freq$count[2] + proj_freq$count[1])*100))
+
+
+```
+redzams, ka vērtības būtiski atšķiras, aggregate() rezultējās mazāk pikseļos. Man jau tāpat šī funkcija nepatika iepriekš aprakstīto iemeslu dēļ. Tomēr arī starp resample() un project() ir atšķirības. Ņemot vērā, ka šajā uzdevumā ir svarīga piesaiste tieši references rastram, tad kopumā domāju, ka resample() funkcija ir ne tikai ātra, bet arī visatbilstošākā.
+
+Noņemtu liekos objektus 
+```{r tirisana3}
+rm(aggregate_rastrs,project_rastrs,agr_freq,res_freq,proj_freq)
+```
+
+
+#4. jauni 100m rastri ar īpatsvariem
+## binārais rastrs
+Šoreiz resample() funkcijai pievienoju argumentu method="max", lai rastrs katram pikselim piešķirtu maksimālo vērtību, kādu satur jebkurš no to veidojošajiem 10m pikseļiem. Dēļ rastra, no kā šis tiek būvēts, šī maksimālā vērtība var būt tikai 1. Tādējādi iegūts rastrs, kas satur bināri kodētas vērtības: Latvijā esošā šūnā ir lauku bloki (vērtība 1) vai to nav (vērtība 0), tāpat kā iepriekš saglabājot šūnas vietām ārpus Latvijas, jau ir izveidots (resample_rastrs). Varam to apskatīt vēlreiz. 
+
+```{r binārais rastrs}
+resample_rastrs2=resample(LAD_rastrs2,ref_rastrs100m_LADam,method="max")
+plot(resample_rastrs2)
+```
+Aprēķinu īpatsvaru (%). Tas tagad ir lielāks kā ieprieš, veidojot ar resample() noklusējuma iestatījumiem. Abi varianti var būt noderīgi kādās situācijās, bet šajā kontekstā šis būs pareizais.
+```{r binārā rastra lauka bloku īpatsvars}
+bin_freq=freq(resample_rastrs2)
+bin_ip=bin_freq$count[2]/(bin_freq$count[2] + bin_freq$count[1])*100
+bin_ip
+```
+Eksportēju šo rastru.
+```{r binārā rastra eksports,warning=FALSE}
+terra::writeRaster(resample_rastrs2, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100bin.tif", gdal=c("COMPRESS=DEFLATE", "TFW=YES"), overwrite=TRUE)
+```
+
+## Rastrs ar % īpatsvaru
+Tagad, jāiegūst rastrs, kas satur informāciju par lauka bloku platību noapaļotu līdz procentam un izteiktu kā veselu skaitli, tāpat kā iepriekš saglabājot šūnas vietām ārpus Latvijas. Manuprāt, lai šo izdarītu, ir jāmaina metodes arguments pie rasterize(), lai tas summē mazo (10x10m) pikseļu skaitu lielajā. Vienā 10x10m šūnā ietilpst 100 gab 10x10m šūnas, kas nozīmē, ka ja saskaitīsim cik daudz mazajos pikseļos ir vērtības "1", iegūsim lielo pikseli, kas jau satur % veselos skaitļos. 
+
+```{r summētais rastrs}
+resample_rastrs3=resample(LAD_rastrs2,ref_rastrs100m_LADam,method="sum")
+plot(resample_rastrs3)
+```
+
+Kā redzms, tiek attēlotas vērtības skalā no 0-100, ka tā arī ir, un par to šajā vakarā liels prieks. 
+Tagad īpatsvars jāaprēķina visai apskatītajai platībai.
+Teorētiski, rezultējošajam īpatsvaram ir jābūt mazākam kā bināriem 100m pikseļiem.
+
+```{r summētā rastra frekvences}
+proc_freq=freq(resample_rastrs3)
+proc_ip=sum(proc_freq$count[2:101])/sum(proc_freq$count[1:101])*100
+proc_ip
+```
+Jā, kā redzams, tas ir nedaudz, nedaudz mazāks. Es gan biju sagaidījusi lielākas atšķirības, tāpēc domāju, ka varbūt kāda cita pieeja ir precīzāka, bet šobrīd nevaru iztēloties kāda. Varbūt neesmu sapratusi jautājumu.
+
+Saglabāšu arī šo rastru uz diska. 
+```{r summētā rastra eksports,warning=FALSE}
+terra::writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum.tif", gdal=c("COMPRESS=DEFLATE", "TFW=YES"),overwrite=TRUE)
+```
+
+un novācu lieko.
+```{r tirisana4}
+rm(bin_freq,proc_freq,LAD_rastrs,ref_rastrs100m_LADam, bin_ip,proc_ip)
+```
+
+## Salīdzinājums
+Sāksim ar aizņemto diska vietu. Salīdzināšu trīs failus - 10m rastru, 100m bināro rastru un 100m summēto rastru. 
+Nezinu kāpēc šis chunks nereaģē uz palaišanu (erroru arī nav, fona nekādi procesi nenotiek)... kodam vajadzētu būt pareizam
+
+```{r Aizņemtā diska vieta, izšķirtspēja}
+izmeri=data.frame(
+  biti=file.size("LAD_rastrs.tif","LAD_rastrs_100bin.tif","LAD_rastrs_100sum.tif"),
+  row.names=c("10m rastrs","100m binārs rastrs","100m summēts rastrs"))
+izmeri$MB=izmeri$biti/1000000
+print(izmeri)
+```
+
+Rezultāti ir absolūti loģiski, jo augstāka izšķirstpēja, jo vairāk vietas uz diska aizņem. Savukārt mazākā izšķirtspējā starp diviem lielākais ir tas, kur pikseļi satur nevis binārus datus, bet dažādas vērtības. 
+
+Tagad pēdējais, izmantotā kodējuma ietekme uz izmēru. 
+Kodējumu iespējams norādīt kā argumentu eksportējot rastru ar writeRaster() funkciju. 
+Pēc noklusējuma tiek izmantots kodējums 'FLT4S', tāpēc to neatkārtošu.
+Pārējie varianti šeit - https://search.r-project.org/CRAN/refmans/raster/html/dataType.html
+Nemēģināšu no tiem 'LOG1S', jo tas jau faktiski tika izdarīts un iepriekš apskatīts.
+Paskatīšos visus INTxx formātus un 'FLT8S'.
+Visiem trīs slāņiem to nedarīšu. Paņemšu pēc izmēra vidējo, 100m summēto rastru. 
+
+```{r kodējumu ietekme uz izmēri}
+writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum_INT1S.tif",datatype = "INT1S", overwrite=TRUE)
+writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum_INT1U.tif",datatype = "INT1U", overwrite=TRUE)
+
+writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum_INT2S.tif",datatype = "INT2S", overwrite=TRUE)
+writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum_INT2U.tif",datatype = "INT2U", overwrite=TRUE)
+
+writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum_INT4S.tif",datatype = "INT4S", overwrite=TRUE)
+writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum_INT4U.tif",datatype = "INT4U", overwrite=TRUE)
+
+writeRaster(resample_rastrs3, filename="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/LAD_rastrs_100sum_FLT8S.tif",datatype = "FLT8S", overwrite=TRUE)
+
+```
+
+Un izmēru salīdzinājums:
+
+```{r Aizņemtā diska vieta, kodējums, echo=TRUE}
+izmeri2=data.frame(
+  biti=file.size("LAD_rastrs_100sum_INT1S.tif", 
+              "LAD_rastrs_100sum_INT1U.tif",
+              "LAD_rastrs_100sum_INT2S.tif",
+              "LAD_rastrs_100sum_INT2U.tif",
+              "LAD_rastrs_100sum_INT4S.tif",
+              "LAD_rastrs_100sum_INT4U.tif",
+              "LAD_rastrs_100sum_FLT8S.tif"),
+  row.names=c("INT1S","INT1U","INT2S", "INT2U", "INT4S", "INT4U", "FLT8S"))
+izmeri2$MB=izmeri2$biti/1000000
+print(izmeri2)
+```
+
+Secinājums: Visvairāk vietu uz diska no šeit apskatītajiem aizņem FLT8S kodējums, bet vismazāk - INT1U. Kopumā tātad, kodējumam ir nozīme, ja strādā ar lieliem datu apjomiem un ir nepieciešamība taupīt diska vietu. 
+
+Noņemu lieko
+```{r tirisana 5}
+rm(izmeri2, resample_rastrs3)
+```
+
