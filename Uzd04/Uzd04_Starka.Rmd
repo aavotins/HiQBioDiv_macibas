@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 Informēju, ka renderēšanas ātruma palielināšanai, no šī markdown dokumenta esmu izņēmusi skripta daļas, kas pārliecinās par atsevišķu funkcijas elementu darbību, pirms funkcijas likšanas kopā. Pilnu rmd dokumentu pievienoju atevišķi, bet tas nav renderēts, lai taupītu laiku. Savukārt šis dokuments sākas jau ar saliktu funkciju.
 
-#Sagatavošanās
+# Sagatavošanās
 Palaižu visas uzdevuma veikšanai nepieciešamās pakotnes.
 ```{r pakotnes, include=FALSE}
 #ja nepieciešams install.packages("nosaukums")
@@ -23,20 +23,21 @@ library(tidyverse)
 library(fasterize)
 library(pryr)
 library(doParallel)
+library(parallel)
 library(foreach)
-
+library(bigstatsr)
 ```
 
 # 1. Funkcijas izveide
-Kad esmu pārliecinājusies, ka atsevišķas funkcijas daļas ir strādājošas un dod nepieciešamo rezultātu (skat. "Uzd04_Starka_garais.rmd"), varu to likt kopā. 
+Šī funkcija ir as faterize() pieeju, kas pēc nelielas optimizēšanas jau ir kļuvusi 2x ātrāka kā funkcijas sākotnējā versija, ko biju izveidojusi. Esmu iepriekš pārliecinājusies, ka atsevišķas funkcijas daļas ir strādājošas un dod nepieciešamo rezultātu.  Izmēģināju arī exactextract, kas ietaupīja pārvēršanu ar rast(), tomēr radās citas problēmas, tāpēc izvēlējos to šoreiz tālāk neizmantot.
 
-```{r mana_funkcija, cache=TRUE}
-  
+Lieku kopā funkciju. 
+```{r ManaFunkcija, cache=TRUE}
 mana_funkcija=function(input_file){
   MVR_centrs = st_read_parquet(input_file)
 
-  ref_rastrs10m=rast("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_rastrs/LV10m_10km.tif")
-  ref_rastrs100m=rast("D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd03/ref_rastrs/LV100m_10km.tif")
+  ref_rastrs10m=rast("../Uzd03/ref_rastrs/LV10m_10km.tif")
+  ref_rastrs100m=rast("../Uzd03/ref_rastrs/LV100m_10km.tif")
   
   ref_rastrs10m_centrs = terra::crop(ref_rastrs10m,MVR_centrs)
   ref_rastrs100m_centrs = terra::crop(ref_rastrs100m,MVR_centrs)
@@ -44,54 +45,29 @@ mana_funkcija=function(input_file){
   ref_rastrs10m_centrs2=raster::raster(ref_rastrs10m_centrs)
   
   priedes=MVR_centrs%>%filter(s10 == 1)
+
   priedes_rastrs10m=fasterize(priedes,ref_rastrs10m_centrs2,background=0)
-  priedes2_rastrs10m=rast(priedes_rastrs10m)
+
+  priedes2_rastrs10m = rast(priedes_rastrs10m)
+
+  priedes2_rastrs10m[is.na(ref_rastrs10m_centrs)] = NA
   
-  priedes2_rastrs10m[is.na(ref_rastrs10m_centrs)] = NA 
-  
-  priedes100=resample(priedes2_rastrs10m,ref_rastrs100m_centrs,method="sum")
-  
-  output_dir = "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd04/"
+  output_dir = "../Uzd04/"
   file_name = tools::file_path_sans_ext(basename(input_file))
-  output_filename = paste0(output_dir, file_name, "_priedes.tif")
-
-  writeRaster(priedes100, filename=output_filename,datatype = "INT1U", overwrite=TRUE)
+  output_filename = paste0(output_dir, file_name, "_priedes.tif")  
+  
+  priedes100=resample(priedes2_rastrs10m,ref_rastrs100m_centrs,
+                      method="average",
+                      filename=output_filename,
+                      overwrite=TRUE)
 }
 
 ```
 
-Parbaudu, cik daudz operatīvās aizņem šī funkcija, ielasot apvienotos centra virsmežniecības datus.
-P.S. laikam dēļ tā, ka izmantoju remote desktop, izsaucot task manager es varu apskatīt sava privātā datora procesus, nevis tā, ko izmantoju attālināti, līdz ar to, lai atbildētu uz jautājumiem par atmiņas lietojumu, jāizmanto komandrindas. No saskarnē pieejamās informācijas - tieši pirms komandas palaišanas R vidē lietoti 2,79 GB, funkcijas laikā RAM lietojums svārstoties palielinās līdz maksimumam 19,74 GB. Ļoti priecājos, ka šo nedaru uz sava datora ar 8GB RAMu.Tomēr es gribu izteikt savas aizdomas, ka šī funkcija, kas mēra RAM lietojumu, pati tērē diezgan daudz operatīvās atmiņas, jo tā paņēma manuprāt vairāk laika, ka zemāk esošais skripts, kas mēra funkcijas laiku, un arī funkcijas laika mērīšanas laikā augstākais atmiņas lietojums, kas parādījās R vides saskatnē bija ~17 GB.
 
-```{r funkcijas RAM pārbaude, cache=TRUE}
-
-RAMlietojums <- function(input_file) {
-  initial_memory <- mem_used()
-  mana_funkcija(input_file)
-  final_memory <- mem_used()
-  memory_used <- final_memory - initial_memory
-  return(memory_used)
-}
-
-input_file_path <- "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/centrs_kopa2.parquet"
-RAMs=RAMlietojums(input_file_path)
-
-print(paste("RAM lietojums izpildot 'mana_funkcija':", (RAMs/(1024^2)), "MB")) 
-
-```
-
-Šis iegūtais rezultāts, manuprāt neatspoguļo visu patiesību par atbiņas lietojumu, tas laikam mēra tikai R sesijas patērēto RAMu, nevis kopā ar sistēmu. Vai tik tur nebija jāpbūt ap 15 GB.
-Katrā ziņā RAM šī uzdevuma veikšanai pietika (bet bija tuvu pārslodzei).
-
-Noņemu ar atmiņas mērījumu saistītās komandrindas:
-```{r tirisana, cache=TRUE, include=FALSE}
-rm(RAMs, RAMlietojums)
-```
-
-
-Lai nu kā, tālāk apskatīšu cik daudz laika patērē šī funkcija. 
-```{r funkcijas laika pārbaude, cache=TRUE}
-input_file_path <- "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/centrs_kopa2.parquet"
+Apskatīšu cik daudz laika patērē šī funkcija, paralēli vērojot atmiņas patēriņu.
+```{r funkcijasLaiks1, cache=TRUE}
+input_file_path <- "../Uzd02/centrs_kopa2.parquet"
 
 funkcijas_laiks=system.time({
   mana_funkcija(input_file_path)
@@ -100,33 +76,28 @@ funkcijas_laiks=system.time({
 print(funkcijas_laiks)
 ```
 
-Kā redzams, funkcija ir diezgan lēna, atrākais rezultāts, ko ieguvu, izpildot vairākas reizes ir 378,65 sekundes, kas ir apmēram 6,3 minūtes (katru reizi šo funkciju izpildot no jauna, laiks nedaudz variē, citreiz izpildot ir 506.87 sekundes, kas jau ir ievērojami vairāk). 
-
-Šādi es neredzu informāciju par izmantotajiem kodoliem, bet balstoties uz uzdevuma aprakstu pieņemu, ka teorētiski vajadzētu izmantot vienu kodolu, jo nav iestatīts citādi. 
+Kā redzams, funkcija ir diezgan palēna, atrākais rezultāts, ko ieguvu, izpildot vairākas reizes ir 166,28 sekundes, kas ir apmēram 2,77 minūtes (katru reizi šo funkciju izpildot no jauna, laiks nedaudz variē). Funkcijas laikā tika izmantots viens CPU kodols, RAM patēriņš svārstījās starp 6-8 GB, maksimumā sasniedzot 18,5 GB. 
 
 # 3. Virsmežniecības nodaļas kā atevišķi faili
 
 Sākumā sagatavošu katras nodaļas datus kā atsevišķu geoparquet failu. 
 
-P.S. Funkcija automatizētai shapefailu konvertēšanai geoparquet formātā ar automatizētu nosaukuma izveidi rezultējās kļūdas paziņojumā sakarā ar formātu atpazīšanas problēmu. Kļūdaino skriptu atstāju iekš  "Uzd04_Starka_garais.rmd"
+```{r nodaluSlanuSagatavosana, message=FALSE, warning=FALSE, cache=TRUE}
 
-Garais, bet strādājošais risinājums:
-```{r nodaļu slāņu sagatavošana 1, message=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+nodala2651 = st_read(dsn="../Uzd02/VMD_MVR_centra",layer="nodala2651")
+st_write_parquet(nodala2651, dsn="../Uzd02/VMD_MVR_centra/nodala2651.parquet")
 
-nodala2651 = st_read(dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra",layer="nodala2651")
-st_write_parquet(nodala2651, dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2651.parquet")
+nodala2652 = st_read(dsn="../Uzd02/VMD_MVR_centra",layer="nodala2652")
+st_write_parquet(nodala2652, dsn="../Uzd02/VMD_MVR_centra/nodala2652.parquet")
 
-nodala2652 = st_read(dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra",layer="nodala2652")
-st_write_parquet(nodala2652, dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2652.parquet")
+nodala2653 = st_read(dsn="../Uzd02/VMD_MVR_centra",layer="nodala2653")
+st_write_parquet(nodala2653, dsn="../Uzd02/VMD_MVR_centra/nodala2653.parquet")
 
-nodala2653 = st_read(dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra",layer="nodala2653")
-st_write_parquet(nodala2653, dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2653.parquet")
+nodala2654 = st_read(dsn="../Uzd02/VMD_MVR_centra",layer="nodala2654")
+st_write_parquet(nodala2654, dsn="../Uzd02/VMD_MVR_centra/nodala2654.parquet")
 
-nodala2654 = st_read(dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra",layer="nodala2654")
-st_write_parquet(nodala2654, dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2654.parquet")
-
-nodala2655 = st_read(dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra",layer="nodala2655")
-st_write_parquet(nodala2655, dsn="D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2655.parquet")
+nodala2655 = st_read(dsn="../Uzd02/VMD_MVR_centra",layer="nodala2655")
+st_write_parquet(nodala2655, dsn="../Uzd02/VMD_MVR_centra/nodala2655.parquet")
 
 rm(nodala2651,nodala2652, nodala2653, nodala2654, nodala2655)
 ```
@@ -134,65 +105,57 @@ rm(nodala2651,nodala2652, nodala2653, nodala2654, nodala2655)
 
 Tālāk pārbaudīšu, cik kodoli vispār ir pieejami datorā, uz kura strādāju (LU).
 
-```{r pieejamie kodoli, cache=TRUE}
-
-detectCores()
+```{r pieejamieKodoli, cache=TRUE}
+bigstatsr::nb_cores()
 ```
-Ir pieejami 6 kodoli. 
+Ir pieejami 3 fiziskie kodoli.
 
-Tagam mēģināšu palaist savu funkciju paralēlam darbam uz vairākiem kodoliem, pie reizes nomērot cik ātri tas notiek. Noteikšu, ka veicot funkcijas jāizmanto paralēli 5 kodoli (vienu no 6 pieejamiem atstājot brīvu). 
+Tagam mēģināšu palaist savu funkciju paralēlam darbam uz vairākiem kodoliem, pie reizes nomērot cik ātri tas notiek. Noteikšu, ka veicot funkcijas jāizmanto paralēli 2 kodoli (vienu no 3 pieejamiem atstājot brīvu). 
 
-```{r paralēla 5 kodolu iestatīšana, eval=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
+```{r darbs2kodoli, warning=FALSE, cache=TRUE}
 
-# Failu ielasīšanas ceļi (garie, jo neatrodas šajā wd)
+# Failu ielasīšanas ceļi 
 input_files <- c(
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2651.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2652.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2653.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2654.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2655.parquet"
+  "../Uzd02/VMD_MVR_centra/nodala2651.parquet",
+  "../Uzd02/VMD_MVR_centra/nodala2652.parquet",
+  "../Uzd02/VMD_MVR_centra/nodala2653.parquet",
+  "../Uzd02/VMD_MVR_centra/nodala2654.parquet",
+  "../Uzd02/VMD_MVR_centra/nodala2655.parquet"
 )
 
 # Kodolu klasera definēšana
-num_cores <- detectCores() - 1  
-cl5 <- makeCluster(num_cores)
-registerDoParallel(cl5)
+num_cores <- nb_cores() - 1  
+cl2 <- makeCluster(num_cores)
+registerDoParallel(cl2)
 
 # Paralēla funkcijas palaišana
-funkcijas_laiks_par=system.time({
-  results <- foreach(file = input_files, .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
+funkcijas_laiks2=system.time({
+  foreach(i = seq_along(input_files), .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
+    file=input_files[i]
     mana_funkcija(file)
   }
 })
 
 # Atiestatu uz kodolu izmantošanu uz noklusējumu
-stopCluster(cl5)
+stopCluster(cl2)
+
+print(funkcijas_laiks2)
 ```
+Palaižot funkciju uz diviem kodoliem, ieguvu rezultātu ātri - 102 sekundes, kas ir 1,7 minūtes. RAM patēriņš izpildes laikā svārstījās ap 6-7GB, maksimums 14,6 GB.
 
-Izpildot augstāk redzamās komandrindas R sesija vairākas reizes avarēja, un vairākas reizes ieguvu paziņojumu "Error in { : task 1 failed - "std::bad_alloc"
-Timing stopped at: 0.27 0.08 47.53", kas nozīmē, ka datoram tomēr pietrūkst RAMs, lai veiktu šīs darbības uz pieciem kodoliem vienlaicīgi. To jau varēja arī nojaust, vērojot atmiņas saskarni R vidē, kas brīdināja par tās pārslodzi. 
+# 4. Izpilde uz viena kodola
 
-#4 Izpilde uz viena kodola
-
-Tagad pārveidošu to pašu kodu, nosakot nevis paralēli visu pieejamos(-1) kodolus, bet tieši vienu. 
-```{r darba uz 1 kodola iestatīšana, warning=FALSE, cache=TRUE}
-
-# Failu ielasīšanas ceļi (jādefinē, jo iepriekšējo chunk izlaidu no renderēšanas)
-input_files <- c(
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2651.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2652.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2653.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2654.parquet",
-  "D:/Users/RutaStarka/Desktop/Git local Ruuta/HiQBioDiv_macibas/Uzd02/VMD_MVR_centra/nodala2655.parquet"
-)
+Tagad pārveidošu to pašu kodu, nosakot darba veikšanu uz tieši vienu. 
+```{r darbs1kodols, warning=FALSE, cache=TRUE}
 
 # Viena kodola klasera definēšana
 cl1 <- makeCluster(1)
 registerDoParallel(cl1)
 
-# Paralēla funkcijas palaišana
+# Funkcijas palaišana
 funkcijas_laiks_1=system.time({
-  results <- foreach(file = input_files, .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
+  foreach(i = seq_along(input_files), .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
+    file=input_files[i]
     mana_funkcija(file)
   }
 })
@@ -203,43 +166,23 @@ stopCluster(cl1)
 # apskatu funkcijas izpildes laiku
 print(funkcijas_laiks_1)
 ```
-Funkcijas izpildes sākumā R vidē bija 1,14 GB, funkcijas izpildes laikā tas saglabājās ap šo vērtību. Funkcijas izpilde prasīja 340,5 sek (5,68 min), bet ne reizi sistēma neavarēja.
+Funkcijas izpilde prasīja 141,56 sek (2,35 min). Funkcijas izpildes laikā RAM patēriņš bija diezgan stabils, svārstījās līdzīgi ap 6-7GB, bet maksimālais patēriņš samazinājās uz 9,7 GB. Tomēr jau redzams, ka uz pusi ilgāks laiks bija nepieciešams, lai funkciju veiktu, kas ir nozīmīgi, ja būtu milzīgs datu apjoms.
 
-#5 Funkcijas palaišana uz diviem vai vairāk kodoliem
-Ņemot vērā RAM ierobežojumus, mēģināšu palaist uz tieši 2 kodoliem. 
-Rediģēju kodu un izmēģinu. 
-
-```{r darba uz 2 kodoliem iestatīšana, warning=FALSE, cache=TRUE}
-
-# Divu kodolu klasera definēšana
-cl2 <- makeCluster(2)
-registerDoParallel(cl2)
-
-# Paralēla funkcijas palaišana
-funkcijas_laiks_2=system.time({
-  results <- foreach(file = input_files, .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
-    mana_funkcija(file)
-  }
-})
-
-# Atiestatu kodolu izmantošanu uz noklusējumu
-stopCluster(cl2)
-
-# apskatu funkcijas izpildes laiku
-print(funkcijas_laiks_2)
-```
-
- Funkcijas palaišanas sākumā R vidē bija 1,26 GB. Izpildes laikā tā palielinājās līdz 1,85 GB, ne miņas no pārslodzes. Ātrums samazinājās teju divkārt (uz 228,68 sek, kas ir 3,8 min), kas ir pilnīgi loģiski. Tas mani iedrošina pamēģināt uz trīs kodoliem. 
+# 5. Funkcijas palaišana uz vairāk kā diviem kodoliem
+Pamēģināšu tagad uz visiem trīs kodoliem. 
  
-```{r darba uz 3 kodoliem iestatīšana, warning=FALSE, cache=TRUE}
+```{r darbs3kodoli, warning=FALSE, cache=TRUE}
+#iztīru atmiņu, citādi saņemu kļūdas paziņojumu par nepietiekamu RAM
+gc()
 
-# Divu kodolu klasera definēšana
+# Trīs kodolu klasera definēšana
 cl3 <- makeCluster(3)
 registerDoParallel(cl3)
 
 # Paralēla funkcijas palaišana
 funkcijas_laiks_3=system.time({
-  results <- foreach(file = input_files, .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
+  foreach(i = seq_along(input_files), .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
+    file=input_files[i]
     mana_funkcija(file)
   }
 })
@@ -250,40 +193,19 @@ stopCluster(cl3)
 # apskatu funkcijas izpildes laiku
 print(funkcijas_laiks_3)
 ```
-Un tagad jau no 1,3 GB līdz 2,02 GB atmiņas lietojums, bet ātrums arvien labāks - jau 173 sekundes (2,99 min). 
+Un tagad jau ātrums arvien labāks - jau neticamas 77 sekundes (1,28 min), tomēr jāpiezīmē, ka šeit jau bija pirms tam jāveic atmiņas tīrīšana ar gc() pirms uzdevuma veikšanas, lai neiegūtu  "std::bad_alloc" paziņojumu par nepietiekamu RAM. Tā patēriņš bija jau vēl augstāks kā uz 2 kodoliem, patstāvīgi grozoties ap 8-10 GB, maksimumā jau ejot pāri 18GB. 
 
-Nu tad pēdējais, pamēģināšu uz 4 kodoliem.
-```{r darba uz 4 kodoliem iestatīšana, eval=FALSE, warning=FALSE, cache=TRUE, include=FALSE}
-
-# Divu kodolu klasera definēšana
-cl4 <- makeCluster(4)
-registerDoParallel(cl4)
-
-# Paralēla funkcijas palaišana
-funkcijas_laiks_4=system.time({
-  results <- foreach(file = input_files, .packages = c("terra", "dplyr","sfarrow","fasterize"), .export="mana_funkcija") %dopar% {
-    mana_funkcija(file)
-  }
-})
-
-# Atiestatu kodolu izmantošanu uz noklusējumu
-stopCluster(cl4)
-
-# apskatu funkcijas izpildes laiku
-print(funkcijas_laiks_4)
-```
-Nu, uz 4 kodoliem jau tomēr sākas problēmas, sistēma avarēja, kļūdas paziņojums par atmiņas trūkumu (Error in { : task 1 failed - "std::bad_alloc"). Skatīt secinājumus.
+Kā pēdējo pamēģināju arī notiekt darbu uz 4 kodoliem, tomēr tur jau tomēr sākas problēmas, sistēma avarēja, kļūdas paziņojums par atmiņas trūkumu (Error in { : task 1 failed - "std::bad_alloc"), kas šķiet loģiski, ņemot vērā, ka ir tikai 3 fiziskie kodoli.
 
 Iztīru R vidi. 
-```{r beigu tīrīšana, cache=TRUE}
+```{r tirisana, warning=FALSE, cache=TRUE}
 rm(cl1, cl2, cl3,
    funkcijas_laiks,
    funkcijas_laiks_1,
-   funkcijas_laiks_2,
+   funkcijas_laiks2,
    funkcijas_laiks_3)
 ```
 
 
-#secinājumi
-Šis uzdevums man liek domāt, ka darbību veikšana uz paralēliem kodoliem ir ātrāks risinājums, tomēr tas ir stabils tikai līdz zināmai robežai. Ideālā gadījumā, tieši piecu geoparket failu apstrādāšana caur funkciju, izmantojot piecus kodolus būtu visātrākais risinājums, tomēr tā nav. Acīmredzot visi pieci tiek vienlaicīgi ielasīti operatīvajā atmiņā un tieši tas ātri vien rada problēmas.Savukārt limitējot darbības tā, lai divi līdz trīs kodoli paliek brīvi, rada ātru, bet stabilu risinājumu.
-Iegūtie rezultāti līdz trīs kodolu paralēlai izmantošanai ir loģiski. 
+# Secinājumi
+Šis uzdevums man liek domāt, ka darbību veikšana uz paralēliem kodoliem ir ātrāks risinājums, tomēr tas ir stabils tikai līdz zināmai robežai. Ideālā gadījumā, tieši piecu geoparket failu apstrādāšana caur funkciju, izmantojot piecus kodolus būtu visātrākais risinājums, tomēr tā nav (jāuzmanās ar atšķirību starp detectCores un num_Cores(), kas man sagādāja problēmas, sākotnēji domājot, ka datoram ir 6 fiziskie kodoli). Limitējot darbības tā, lai viens fiziskais kodols paliek brīvs, rada ātru (ne visātrāko), bet stabilu risinājumu. Visātrākais, tomēr nestabils risinājums, tika iegūts palaižot funkciju uz visiem trīs kodoliem (vairākas reizes ieguvu paziņojumu "Error in { : task 1 failed - "std::bad_alloc", ko atrisināju ar gc() pirms funkcijas). 
