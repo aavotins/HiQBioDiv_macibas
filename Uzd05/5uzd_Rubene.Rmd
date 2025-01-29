@@ -1,0 +1,135 @@
+---
+title: "5uzd_Rubene"
+author: "Betija Rubene"
+date: "2025-01-27"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Piektais uzdevums: procesu dalīšana un rezultātu apvienošana
+
+Darbam nepieciešamās pakotnes
+
+```{r, warning = FALSE}
+library(terra)
+library(tidyverse)
+library(sf)
+library(sp)
+library(sfarrow)
+library(leaflet)
+library(stringr)
+```
+
+# Sagatavošanās
+
+Ielasu karti, no kuras jāizvēlas četras blakus esošas karšu lapas, kā arī meža datus un references rastrus
+
+```{r}
+karte <- st_read_parquet("../ref_vektori/tks93_50km.parquet")
+mezi <- st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
+ref10m <- rast("../ref_rastri/LV10m_10km.tif")
+ref100m <- rast("../ref_rastri/LV100m_10km.tif")
+```
+
+Tā kā vēlāk šajā uzdevumā būs interesējoši daudz skatīties uz lietām, kas notiek gar malām, būtu vērtīgi iemācīties izmantot pakotni leaflet. To arī varu izmantot lapu izvēlei.
+
+Nav svarīgi, kā izvēlēties lapas - paņemšu lapas kaut kur pa vidu, jo strādājam ar centra vismežniecības datiem
+
+```{r}
+class(karte)
+
+karte_latlon <- st_transform(karte, crs = 4326) # leaflet pieprasa WGS84
+
+leaflet(karte_latlon) %>%
+  addTiles() %>%  
+  addPolygons(
+    popup = ~paste("Attribute:", NUMURS) # gribu redzēt numuru uzklikšķinot
+  )
+```
+
+Izvēlējos lapas 3333, 3334, 3331 un 3332, ievietoju tās atsevišķā objektā
+
+```{r}
+lapas <- karte %>% filter(NUMURS %in% c(3333,3334,3331,3332))
+```
+
+Vēl sagatavojoties jāpanāk, ka izvades rastrs aptvertu tikai to teritoriju, kas pilnībā iekļaujas iterētajā telpā (kartes lapā) to pilnībā aptverot. 
+
+Neesmu droša, vai pareizi saprotu domu par parametru sagatavošanu pirms ievietošanas funkcijā kā alternatīvu funkcijas modificēšanai.
+Es to uztvēru kā meža datu un references rastru apgriešanu un saglabāšanu un ielasīšanu funkcijā tā vietā, lai ielasītu visus mežus un tad tos apgrieztu. Šis variants šajā gadījumā šķiet gana loģisks, jo uzdevums jāpilda ar vieniem un tiem pašiem failiem vairākas reizes. 
+
+```{r, warning = FALSE}
+lapas_list <- split(lapas, lapas$NUMURS)
+
+# cikls kurā izveidošu un saglabāšu visus nepieciešamos failus katrai lapai atsevišķi
+for (i in seq_along(lapas_list)) {
+  lapa <- lapas_list[[i]]
+  bbox <- st_bbox(lapa)
+  bbox_polygon <- st_as_sfc(bbox) 
+  bbox_polygon <- st_set_crs(bbox_polygon, st_crs(lapa)) 
+  bbox_polygon <- st_transform(bbox_polygon,st_crs(mezi))
+  # tiek galā ar crs nesakritībām
+  
+  # meža datu apgriešana
+  cropped1 <- st_intersection(mezi, bbox_polygon)
+  file_name1 <- paste0("lapa", unique(lapa$NUMURS), "_mezi.parquet")
+  st_write_parquet(cropped1, file_name1)
+  
+  # 10 m references rastra apgriešana
+    cropped2 <- crop(ref10m, bbox_polygon)
+  file_name2 <- paste0("lapa", unique(lapa$NUMURS), "_rast10m.tif")
+  writeRaster(cropped2,file_name2, overwrite = TRUE)
+  
+  # 100 m references rastra apgriešana
+  cropped3 <- crop(ref100m, bbox_polygon)
+  file_name3 <- paste0("lapa", unique(lapa$NUMURS), "_rast100m.tif")
+  writeRaster(cropped3,file_name3, overwrite = TRUE)
+}
+```
+
+Iepriekšējā uzdevumā izveidotā funkcija, kurā bija nepieciešams veikt dažas nelielas izmaiņas:
+
+```{r}
+mana_funkcija <- function(mezs_dati,koku_suga) {
+mezi <- st_read_parquet(mezs_dati)
+numurs <- str_extract(mezs_dati, "(?<=lapa)\\d+")
+rast10m_path <- paste0("lapa", numurs, "_rast10m.tif")
+ref10m <- rast(rast10m_path)
+rast100m_path <- paste0("lapa", numurs, "_rast100m.tif")
+ref100m <- rast(rast100m_path)
+faila_nos <- paste0("lapa", numurs, "_priedes100m")
+fails <- file.path(paste0(faila_nos, ".tif"))
+priezu_mezi <- mezi %>% filter(s10 == koku_suga)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
+priezu_mezi_100m <-
+  terra::resample(priezu_mezi_10m,ref100m,method="average",
+                  filename = fails, overwrite=TRUE)
+}
+```
+
+Sākumā pirms ciklu izveides pārbaudīšu, vai viss strādā, kā nākas
+
+```{r}
+mana_funkcija(mezs_dati = "lapa3333_mezi.parquet", koku_suga = 1)
+# funkcija strādā, izvades fails ir parādījies mapītē
+# bet kā izskatās gala rezultāts?
+parbaude <- rast("lapa3333_priedes100m.tif")
+plot(parbaude) # izskatās pareizi :)
+rm(parbaude)
+```
+
+
+# 1) Spatial join
+
+1.1. solis: izmantojot spatial join, saistiet MVR datus ar izvēlētajām karšu lapām (šis ir sākums laika mērogošanai). Kāds ir objektu skaits pirms un pēc savienošanas? Apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
+
+```{r}
+
+```
+
+
+
