@@ -41,9 +41,11 @@ Nav svarīgi, kā izvēlēties lapas - paņemšu lapas kaut kur pa vidu, jo str�
 ```{r}
 class(karte)
 
-karte_latlon <- st_transform(karte, crs = 4326) # leaflet pieprasa WGS84
+karte <- st_transform(karte, crs = 4326) # leaflet pieprasa WGS84
+# transformēšanas rezultātā radušās problēmas ar ģeometriju pārklāšanos, tas jāatrisina
+mezi <- st_transform(mezi, crs = 4326)
 
-leaflet(karte_latlon) %>%
+leaflet(karte) %>%
   addTiles() %>%  
   addPolygons(
     popup = ~paste("Attribute:", NUMURS) # gribu redzēt numuru uzklikšķinot
@@ -54,37 +56,37 @@ Izvēlējos lapas 3333, 3334, 3331 un 3332, ievietoju tās atsevišķā objektā
 
 ```{r}
 lapas <- karte %>% filter(NUMURS %in% c(3333,3334,3331,3332))
+lapas_list <- split(lapas, lapas$NUMURS) # saraksts
+```
+
+Tālāk veicot uzdevumu man bija problēmas ar lapas numura iekļaušanu faila nosaukumā, ielasot objektus no saraksta (ja iterē pa saraksta objektiem, tos atlasot, lapas nr paliek sarakstā un nav pieejams). Es šim nevarēju izdomāt risinājumu, tāpēc es lapas arī saglabāšu un tad izveidošu sarakstu, ar kuru strādāt.
+
+```{r}
+lapas_list_paths <- 
 ```
 
 Vēl sagatavojoties jāpanāk, ka izvades rastrs aptvertu tikai to teritoriju, kas pilnībā iekļaujas iterētajā telpā (kartes lapā) to pilnībā aptverot. 
 
 Neesmu droša, vai pareizi saprotu domu par parametru sagatavošanu pirms ievietošanas funkcijā kā alternatīvu funkcijas modificēšanai.
-Es to uztvēru kā meža datu un references rastru apgriešanu un saglabāšanu un ielasīšanu funkcijā tā vietā, lai ielasītu visus mežus un tad tos apgrieztu. Šis variants šajā gadījumā šķiet gana loģisks, jo uzdevums jāpilda ar vieniem un tiem pašiem failiem vairākas reizes. 
+Es to uztvēru kā kartes lapu definēšanu, kā arī references rastru apgriešanu un saglabāšanu un ielasīšanu funkcijā tā vietā, lai katru reizi no jauna tos apgrieztu. 
 
-```{r, warning = FALSE}
-lapas_list <- split(lapas, lapas$NUMURS)
+```{r, warning = FALSE, cache = TRUE}
+ref10m <- project(ref10m, "EPSG:4326")
+ref100m <- project(ref100m, "EPSG:4326")
+# spatRaster objekti, tāpēc nevar pielietot st_transform
 
 # cikls kurā izveidošu un saglabāšu visus nepieciešamos failus katrai lapai atsevišķi
 for (i in seq_along(lapas_list)) {
   lapa <- lapas_list[[i]]
-  bbox <- st_bbox(lapa)
-  bbox_polygon <- st_as_sfc(bbox) 
-  bbox_polygon <- st_set_crs(bbox_polygon, st_crs(lapa)) 
-  bbox_polygon <- st_transform(bbox_polygon,st_crs(mezi))
   # tiek galā ar crs nesakritībām
   
-  # meža datu apgriešana
-  cropped1 <- st_intersection(mezi, bbox_polygon)
-  file_name1 <- paste0("lapa", unique(lapa$NUMURS), "_mezi.parquet")
-  st_write_parquet(cropped1, file_name1)
-  
   # 10 m references rastra apgriešana
-    cropped2 <- crop(ref10m, bbox_polygon)
+    cropped2 <- crop(ref10m, lapa)
   file_name2 <- paste0("lapa", unique(lapa$NUMURS), "_rast10m.tif")
   writeRaster(cropped2,file_name2, overwrite = TRUE)
   
   # 100 m references rastra apgriešana
-  cropped3 <- crop(ref100m, bbox_polygon)
+  cropped3 <- crop(ref100m, lapa)
   file_name3 <- paste0("lapa", unique(lapa$NUMURS), "_rast100m.tif")
   writeRaster(cropped3,file_name3, overwrite = TRUE)
 }
@@ -102,7 +104,23 @@ rast100m_path <- paste0("lapa", numurs, "_rast100m.tif")
 ref100m <- rast(rast100m_path)
 faila_nos <- paste0("lapa", numurs, "_priedes100m")
 fails <- file.path(paste0(faila_nos, ".tif"))
-priezu_mezi <- mezi %>% filter(s10 == koku_suga)
+priezu_mezi <- mezs_dati %>% filter(s10 == koku_suga)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
+priezu_mezi_100m <-
+  terra::resample(priezu_mezi_10m,ref100m,method="average",
+                  filename = fails, overwrite=TRUE)
+}
+
+mana_funkcija <- function(mezs_dati,koku_suga) {
+numurs <- str_extract(mezs_dati, "(?<=lapa)\\d+")
+rast10m_path <- paste0("lapa", numurs, "_rast10m.tif")
+ref10m <- rast(rast10m_path)
+rast100m_path <- paste0("lapa", numurs, "_rast100m.tif")
+ref100m <- rast(rast100m_path)
+faila_nos <- paste0("lapa", numurs, "_priedes100m")
+fails <- file.path(paste0(faila_nos, ".tif"))
+priezu_mezi <- mezs_dati %>% filter(s10 == koku_suga)
 priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
 priezu_mezi_10m[is.na(ref10m)] <- NA
 priezu_mezi_100m <-
@@ -114,22 +132,184 @@ priezu_mezi_100m <-
 Sākumā pirms ciklu izveides pārbaudīšu, vai viss strādā, kā nākas
 
 ```{r}
-mana_funkcija(mezs_dati = "lapa3333_mezi.parquet", koku_suga = 1)
+mana_funkcija(mezs_dati = mezi, koku_suga = 1)
 # funkcija strādā, izvades fails ir parādījies mapītē
 # bet kā izskatās gala rezultāts?
 parbaude <- rast("lapa3333_priedes100m.tif")
 plot(parbaude) # izskatās pareizi :)
-rm(parbaude)
+rm(parbaude, karte, ref10m, ref100m, lapas)
 ```
-
 
 # 1) Spatial join
 
 1.1. solis: izmantojot spatial join, saistiet MVR datus ar izvēlētajām karšu lapām (šis ir sākums laika mērogošanai). Kāds ir objektu skaits pirms un pēc savienošanas? Apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
 
+Nezinu, kāda ir ierastā prakse un kā kopumā ir ērtāk (gan jau tikai ar laiku sapratīšu), bet, ja uzreiz neielasa visus failus kā objektus, cikli sāk jau palikt pārāk sarežģīti (jo jānorāda pareizie ielasīšanas ceļi ar attiecīgo lapas numuru), to izveide ir ilga un un es vairs nevaru visam izsekot līdzi. Tāpēc vispirms ielasīšu failus un salikšu tos sarakstos.
+
+```{r}
+rast10m_files <- list.files(pattern = "^lapa\\d{4}_rast10m.tif$", full.names = TRUE)
+rast100m_files <- list.files(pattern = "^lapa\\d{4}_rast100m.tif$", full.names = TRUE)
+
+rast10m_list <- lapply(rast10m_files, rast)
+rast100m_list <- lapply(rast100m_files, rast)
+
+# nomainu nosaukumus sarakstos, lai nekas nesajūk
+names(rast10m_list) <- sub(".*lapa(\\d{4})_.*", "\\1", basename(rast10m_files))
+names(rast100m_list) <- sub(".*lapa(\\d{4})_.*", "\\1", basename(rast100m_files))
+```
+
+Izmantoju spatial join.
+
+```{r, message = FALSE}
+# bet vispirms jātiek galā ar crs nesakritībām
+st_crs(lapas_list[["3331"]])
+st_crs(mezi)
+# abiem vajag vienādi, palieku pie WGS-84, jo to pieprasa leaflet kartes
+
+mezi <- st_transform(mezi, st_crs(lapas_list[["3331"]]))
+# jānorāda konkrēts objekts no saraksta, jo tikai pašiem objektiem ir crs, bet sarakstam kā tādam nav
+# crs pārveidošanas rezultātā radās problēmas ar ģeometrijām, kas pārklājas
+mezi <- st_make_valid(mezi)
+
+uzd1_1 <- list() # šeit ievietošu rezultātus
+
+for (i in seq_along(lapas_list)) {
+  lapa <- lapas_list[[i]]
+  uzd1_1[[i]] <- st_join(mezi, lapa, left = FALSE)
+} # left = FALSE, lai atgrieztu tikai objektus, kuru ģeometrijas ir saistītas, tātad 
+# tikai tos, kuri ietilpst kartes lapā
+
+# vienkāršā veidā paskatīšos vienu karti, vai izskatās ok
+plot(st_geometry(uzd1_1[[1]]))
+```
+
+Pirms savienošanas objektā mezi ir 505654 objekti, katrā lapā piederīgi ir 15729, 29042, 33449 un 32904 objekti.
+
+Paskatīšu, kas notiek kartes lapas malās ar leaflet interaktīvo karti pirmajai kartes lapai:
+
 ```{r}
 
+leaflet() %>%
+  addTiles() %>%
+  addPolygons(data = lapas_list[[1]], color = "blue", group = "lapas_list") %>%
+  addPolygons(data = uzd1_1[[1]], color = "green", group = "uzd1_1")
+```
+
+Kartes lapai piederīgie objekti, kā jau bija sagaidāms, ir visi, kuri kaut vai daļēji ietilpst kartes lapā. Tātad atlasītie objekti gar malām daļēji atrodas arī ārpus lapas.
+
+
+1.2. solis - iteratīvā ciklā izmantojiet pārskatīto funkciju no uzdevuma sākuma, lai saglabātu katras karšu lapas rezultātu savā GeoTIFF failā, kura nosaukums ir saistāms ar šo apakšuzdevumu un individuālo lapu. Kā izskatās šūnu aizpildījums pie karšu lapu malām? Vai ir saglabājušies objekti ārpus kartes lapām?
+
+```{r}
+mana_funkcija <- function(mezs_dati,koku_suga, uzd_nr) {
+numurs <- str_extract(mezs_dati, "(?<=lapa)\\d+")
+rast10m_path <- paste0("lapa", numurs,"_", uzd_nr, "_rast10m.tif")
+ref10m <- rast(rast10m_path)
+rast100m_path <- paste0("lapa", numurs, "_rast100m.tif")
+ref100m <- rast(rast100m_path)
+faila_nos <- paste0("lapa", numurs,"_",uzdevums, "_priedes100m")
+fails <- file.path(paste0(faila_nos, ".tif"))
+priezu_mezi <- mezs_dati %>% filter(s10 == koku_suga)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
+priezu_mezi_100m <-
+  terra::resample(priezu_mezi_10m,ref100m,method="average",
+                  filename = fails, overwrite=TRUE)
+}
 ```
 
 
+Pielietoju funkciju:
 
+```{r}
+for (i in seq_along(uzd1_1)) {
+  mana_funkcija(mezs_dati = uzd1_1[[i]], koku_suga = 1, uzd_nr = "1uzd")
+}
+
+#for (lapa in seq_along(uzd1_1)) {
+  mana_funkcija(lapa, koku_suga == 1)
+}
+```
+
+```{r}
+test <- mana_funkcija(mezs_dati = uzd1_1[[3331]], koku_suga = 1, uzdevums = "1uzd")
+
+for (i in seq_along(uzd1_1)) {
+  mana_funkcija(mezs_dati = uzd1_1[[i]], koku_suga = 1, uzdevums = "1uzd")
+```
+
+
+del
+```{r}
+mana_funkcija <- function(mezs_dati, koku_suga, uzdevums) {
+  # Check if the 'name' column exists
+  if (!"name" %in% colnames(mezs_dati)) {
+    stop("Column 'name' not found in the input data.")
+  }
+
+  # Extract numurs from the 'name' column
+  numurs <- unique(mezs_dati$name)
+
+  # Check if there are multiple or no unique 'name' values
+  if (length(numurs) != 1) {
+    stop("Expected exactly one unique value in the 'name' column, but found: ", length(numurs))
+  }
+
+  cat("Processing with numurs:", numurs, "\n")
+
+  # Construct raster paths
+  rast10m_path <- paste0("lapa", numurs, "_rast10m.tif")
+  rast100m_path <- paste0("lapa", numurs, "_rast100m.tif")
+  
+  # Check if the raster files exist
+  if (!file.exists(rast10m_path)) {
+    stop("Raster file not found:", rast10m_path)
+  }
+  if (!file.exists(rast100m_path)) {
+    stop("Raster file not found:", rast100m_path)
+  }
+  
+  # Load raster files
+  ref10m <- rast(rast10m_path)
+  ref100m <- rast(rast100m_path)
+
+  # Output file path
+  faila_nos <- paste0("lapa", numurs, "_", uzdevums, "_priedes100m")
+  fails <- file.path(paste0(faila_nos, ".tif"))
+  
+  # Filter for the specified tree species
+  priezu_mezi <- mezs_dati %>% filter(s10 == koku_suga)
+
+  # Check if any data was returned after filtering
+  if (nrow(priezu_mezi) == 0) {
+    cat("No rows after filtering for species:", koku_suga, "\n")
+    return(NULL)  # Exit if no data
+  }
+  cat("Rows after filtering for species:", koku_suga, ":", nrow(priezu_mezi), "\n")
+
+  # Rasterize the data
+  priezu_mezi_10m <- rasterize(priezu_mezi, ref10m, background = 0)
+  priezu_mezi_10m[is.na(ref10m)] <- NA
+
+  # Check if the rasterization worked
+  if (sum(!is.na(priezu_mezi_10m[])) == 0) {
+    cat("Rasterization failed: no valid pixels in the result.\n")
+    return(NULL)
+  }
+
+  # Resample to 100m resolution and save the file
+  resampled <- terra::resample(priezu_mezi_10m, ref100m, method = "average", filename = fails, overwrite = TRUE)
+
+  # Check if the file was written successfully
+  if (file.exists(fails)) {
+    cat("File written successfully to:", fails, "\n")
+  } else {
+    cat("Failed to write file to:", fails, "\n")
+  }
+
+  return(fails)  # Return the output file path if needed
+}
+
+# Running the function for testing
+test <- mana_funkcija(mezs_dati = uzd1_1[["3331"]], koku_suga = 1, uzdevums = "1uzd")
+```
