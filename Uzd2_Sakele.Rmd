@@ -1,0 +1,207 @@
+---
+title: "Uzd2_Sakele"
+author: "Vita"
+date: "2024-12-15"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Lejupielāde
+```{r}
+if (!require("RCurl")) install.packages("RCurl");library(RCurl)
+if (!require("archive")) install.packages("archive");library(archive)
+
+if (!dir.exists("Download")) {
+  dir.create("Download")
+}
+
+
+url= "https://data.gov.lv/dati/lv/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92/resource/392dfb67-eeeb-43c2-b082-35f9cf986128/download/centra.7z"
+
+destfile = "Download/centra.7z"
+
+download.file(url=url, destfile = destfile, mode='wb')
+
+
+
+if (!dir.exists("data")) {
+  dir.create("data")
+}
+archive_extract(destfile, dir = "data")
+
+
+```
+
+#Konvertācija un izmēri
+
+```{r}
+if (!require("sf")) install.packages("sf")
+library(sf)
+
+
+if (!dir.exists("converted_data")) {
+  dir.create("converted_data")
+}
+
+# Path to your shapefile
+shapefile_path <- "data/nodala2651.shp" 
+
+# Read the shapefile into an sf object
+shp <- st_read(shapefile_path)
+
+# Convert to GeoPackage
+st_write(shp, "converted_data/output.gpkg", driver = "GPKG")
+
+# Convert to GeoParquet
+if (!require("sfarrow")) install.packages("sfarrow")
+library(sfarrow)
+st_write_parquet(shp, "converted_data/output.parquet")
+
+
+file.size("converted_data/output.parquet") # 21 795 679
+file.size("converted_data/output.gpkg") # 57 188 352
+file.size("data/nodala2651.shp") #27 090 844
+```
+
+#Ielasīšanas laika mērījumi
+```{r}
+if (!require("microbenchmark")) install.packages("microbenchmark")
+library(microbenchmark)
+```
+
+```{r}
+ielades_atrums <- microbenchmark(
+  read_shape = st_read("data/nodala2651.shp"), # vidēji 9.6 sek
+  read_gpkg = st_read("converted_data/output.gpkg"), # vidēji 6.5 sek
+  read_parquet = st_read_parquet("converted_data/output.parquet"), #vidēji 2.5 sek
+  times = 10,
+  unit="s"
+)
+print(ielades_atrums)
+```
+
+
+
+```{r}
+```
+
+#Failu apvienošana
+
+```{r}
+if (!dir.exists("data/apvienotie")) {
+  dir.create("data/apvienotie")
+}
+
+file_list <- list.files("data", pattern = "*shp$", full.names = TRUE)
+shapefile_list <- lapply(file_list, read_sf) #ielasa visus failus
+combined_shapefile <- do.call(rbind, shapefile_list) # apvieno vienā failā
+st_write(combined_shapefile, "data/apvienotie/Centra.shp") # ieraksta apvienoto failu uz diska
+```
+
+
+```{r}
+```
+
+#Ģeometriju pārbaude
+```{r}
+
+# Pārbaudīt, vai visas ģeometrijas ir MULTIPOLYGON
+if(all(st_geometry_type(combined_shapefile) == "MULTIPOLYGON")) {
+  print("Visas ģeometrijas ir MULTIPOLYGON")
+} else {
+  print("Dažas ģeometrijas nav MULTIPOLYGON")
+  }
+
+# Pārbaudīt, vai nav tukšu ģeometriju
+if(any(st_is_empty(combined_shapefile))) {
+  print("Slānī ir tukšas ģeometrijas")
+  # Izdzēst tukšās ģeometrijas
+  combined_shapefile <- combined_shapefile[!st_is_empty(combined_shapefile), ] 
+}
+
+# Pārbaudīt, vai nav kļūdainu ģeometriju
+if(any(!st_is_valid(combined_shapefile))) {
+  print("Slānī ir kļūdainas ģeometrijas")
+  # Izdzēst kļūdainās ģeometrijas
+  combined_shapefile <- combined_shapefile[st_is_valid(combined_shapefile), ] 
+}
+
+```
+
+
+#Priežu meži
+
+```{r}
+
+
+  rezultats_visi_sk_lauk <- combined_shapefile %>%
+  select(-geometry) %>%   #lai skaita bez ģeometrijas
+  slice(1:100) %>% # ātrais variants, pirmie ieraksti
+  pivot_longer(
+    cols = c(s10, s11, s12, s13, s14, g10, g11, g12, g13, g14), 
+    names_to = c(".value", "Group"), 
+    names_pattern = "([sg])(\\d+)"
+  ) %>%
+   group_by(objectid, s) %>%
+  summarise(Laukums = sum(g), .groups = "drop")
+  
+  rezultats_visi_sk_lauk
+  
+  #Klasificē par priežu mežiem
+  priedes <- rezultats_visi_sk_lauk %>%
+  group_by(objectid) %>%
+  summarise(
+    prop_priedes = ifelse(any(s == 1), sum(Laukums[s == 1]) / sum(Laukums), NA_real_),
+    PriezuMezi = ifelse(any(s == 1), ifelse(sum(Laukums[s == 1]) / sum(Laukums) >= 0.75, 1, 0), NA_real_),
+    .groups = "drop"
+  )
+  
+  priedes
+
+#Priežu meži no visiem mežiem
+  sum(priedes$PriezuMezi, na.rm = TRUE)/n_distinct(priedes$objectid)
+
+```
+#Citi  meži
+
+Ja sugas, kas pieder konkrētam meža tipam, veido vismaz 75% šķerslaukuma, tad 
+tiek izskatīts, ka mežs ir attiecigā tipa. Pretējā gadījumā tas ir jauktu koku mežs, jo
+neviena sugu grupa nedominē.
+
+```{r}
+#Sugu piederība
+skujkoki = c(1, 3, 13, 14, 15, 22, 23, 28, 29)
+platlapji = c( 10, 11, 12, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 32, 35, 50, 61, 62, 63, 64, 65, 66, 67, 69)
+saurlapji = c(4, 6, 8, 9, 68)
+
+rezultats_visi_sk_lauk
+
+
+
+mezu_klasifik<-subset( rezultats_visi_sk_lauk, select = -geometry ) %>%
+group_by(objectid) %>%
+  summarize(koku_grupa = case_when(
+      sum(Laukums[s %in% saurlapji]) / sum(Laukums) >= 0.75 ~ "Šaurlapju mežs",
+      sum(Laukums[s %in% platlapji]) / sum(Laukums) >= 0.75 ~ "Platlapju mežs",
+      sum(Laukums[s %in% skujkoki]) / sum(Laukums) >= 0.75 ~ "Skujkoku mežs",
+      TRUE ~ "Jauktu koku mežs")
+  )
+    
+  mezu_klasifik
+
+```
+
+
+#Visu mežaudžu failu dzēšana
+```{r}
+
+unlink("data", recursive = TRUE)
+unlink("converted_data", recursive = TRUE)
+unlink("Download", recursive = TRUE)
+
+```
+
+
