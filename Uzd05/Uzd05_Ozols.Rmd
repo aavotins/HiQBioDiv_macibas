@@ -1,0 +1,473 @@
+---
+title: "Uzd05_Ozols"
+author: "Janis Ozols"
+date: "2025-01-21"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Uzdevums
+
+Šim uzdevumam ir kopīga sagatavošanās, tomēr tā sekojošās daļas ved pie viena un 
+tā paša rezultāta, izmantojot dažādus vingrinājumus. Tāds arī ir tā uzdevums - 
+vingrināt izpratni un intuīciju komandu rindās, R un darbā ar telpiskiem datiem.
+
+Šim uzdevumam izmantojami pirmajā uzdevumā apvienotie Valsts meža dienesta Centra 
+virsmežniecības dažādo nodaļu apvienotie MVR dati un projekta 
+[Zenodo repozitorijā](https://zenodo.org/communities/hiqbiodiv/records?q=&l=list&p=1&s=10&sort=newest) 
+pieejamie references dati (gan vektoru, gan rastra). Sakot darbu, brīvi izvēlieties 
+(vienalga kā, vienalga kurā programmā) četras blakus esošas `tks93_50km` karšu 
+lapas, kurās ir Centra virsmežniecības MVR dati par mežaudzēm - šīs lapas 
+ievietojiet atsevišķā R objektā un izmantojiet turpmākam darbam kā neatkarīgas 
+telpiskās daļas iteratīvā aprēķinu procesā. 
+1. Sagatavojam vidi atverot nepieciešamās paketes
+```{r,paketes, warning=FALSE,message=FALSE}
+library(sf)
+library(arrow)
+library(sfarrow)
+library(tidyverse)
+library(terra)
+library(tools)
+library(raster)
+library(fasterize)
+library(units)
+```
+2. Ielasam failu
+```{r,tks93_50km lapas}
+lapas <- st_read_parquet(dsn = "C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\tks93_50km.parquet")
+summary(lapas)
+plot(lapas["NUMURS"])
+```
+3. ielasam apvienoto mvr failu 
+```{r, apvienotais mvr fails}
+meza_centra_dati <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd04\\mezicentrs.parquet")
+summary(meza_centra_dati)
+plot(meza_centra_dati["geometry"])
+```
+4. nomainam tks93 faila koordinātas uz LKS92
+```{r,datu_lapas_koordinates}
+lapas <- st_transform(lapas, crs = 3059)
+```
+5. savienojam mvr datus ar lapām izmantojot st_join, izmantojam unique, lai iegūtu lapu sarakstu, kurās ir MVR dati
+
+```{r,mvr_dati_lapas}
+lapas_mvr_dati <- st_join(meza_centra_dati,lapas)
+unique(lapas_mvr_dati$NUMURS)
+```
+Izvēlēmies lapas un izveidojam parquet failus.
+```{r,lapa_parqueti,warning=FALSE}
+lapa3333 <- lapas |> filter(lapas$NUMURS %in% "3333")
+st_write_parquet(lapa3333,"C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333.parquet")
+lapa3334 <- lapas |> filter(lapas$NUMURS %in% "3334")
+st_write_parquet(lapa3334,"C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334.parquet")
+lapa3343 <- lapas |> filter(lapas$NUMURS %in% "3343")
+st_write_parquet(lapa3343,"C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343.parquet")
+lapa3344 <- lapas |> filter(lapas$NUMURS %in% "3344")
+st_write_parquet(lapa3344,"C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344.parquet")
+```
+Izveidojam list objektu
+```{r,lapas_list}
+lapas_parqueti <- list.files("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05",pattern = "\\.parquet$")
+lapas_parqueti
+```
+
+Pirms ķeršanās pie uzdevuma, pārskatiet ceturtā uzdevuma funkciju `mana_funkcija` 
+tā, lai izvades rastrs (priežu mežaudzu īpatsvars (no kopējās platības) 100 m šūnā) aptvertu tikai to teritoriju, kas pilnībā iekļaujas iterētajā telpā (kartes lapā) to pilnībā aptverot.
+
+mana_funkcija2 <- function(ievades_fails,direktorija) {
+  starts <- Sys.time()
+  mvr_fails <- st_read_parquet(ievades_fails)
+  mezaudze <- mvr_fails %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(direktorija,ievades_nosaukums, ".parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+
+Pārskatot funkciju, nepieciešams, lai kartes lapa un references slāļa robežas atbilstu viena otrai, references rastru nepieciešams izgriezt pēc lapas robežām.  
+
+
+Apsveriet ievades parametru sagatavošanu pirms ievietošanas funkcijā 
+kā alternatīvu funkcijas modificēšanai.
+
+
+Salīdziniet procesēšanas laiku katrā 
+uzdevuma daļā (sekojošajā uzskaitījumā) no telpas dalīšanas uzsākšanas 
+(ieskaitot) līdz noslēdzošajam rastram (ieskaitot).
+
+Pirmais apakšuzdevums.
+1.1. solis: izmantojot spatial join saistiet MVR datus ar izvēlētajām karšu lapām (šis ir sākums laika mērogošanai). Kāds ir objektu skaits pirms un pēc savienošanas? Apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
+
+```{r,spatial_join}
+spatialjoin_funkcija <- function(ievades_fails){
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_join(meza_centra_dati,lapa,left = FALSE)
+  plot(mvr_lapa["geometry"])
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "mvr.parquet"))
+  st_write_parquet(mvr_lapa,izvades_fails)
+  finish <- Sys.time()
+}
+```
+Izmēģinam funckiju ar vienu lapu
+```{r,funkcija,warning=FALSE}
+spatialjoin_funkcija("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333.parquet")
+```
+```{r,mvrdati_lapas,warning=FALSE}
+system.time(sapply(lapas_parqueti,spatialjoin_funkcija))
+```
+Ielasam katru lapu, lai apskatītos to objektu skaitu
+```{r,ielasam lapas_spatial_join}
+lapa3333_mvr <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333mvr.parquet")
+lapa3333_mvr
+lapa3334_mvr <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334mvr.parquet")
+lapa3334_mvr
+lapa3343_mvr <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343mvr.parquet")
+lapa3343_mvr
+lapa3344_mvr <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344mvr.parquet")
+lapa3344_mvr
+```
+Atbilde: Objektu skaits pirms savienošanas ir pilnais mvr objektu skaits, objektu skaits pēc savienošanas katrā lapā ir atšķirīgs (lapai 3333 ir 33449, lapai 3334 ir 32904, lapai 3343 ir 21466 un lapai 3344 ir 7874 nogabali, kopā 95693 nogabali), izmēģināju savienot ar argumentu join = st_within, ieguvu tikai nogabalus, kas pilnībā ietilpst kartes lapā, tomēr daļa no teritorijām, kas ietilpst kartes lapā neuzrādījās, kā arī izgriežot 10m rastru precīzi pa kartes lapas robežām, nogabalu daļas, kas atradīsies ārpus kartes lapas neietekmēs 10m rastra šūnu rezultātus. Iekļauti ir visi objekti, kas atrodas lapā, tai skaitā uz robežām.
+
+1.2. solis: iteratīvā ciklā izmantojiet pārskatīto funkciju no uzdevuma sākuma, lai saglabātu katras karšu lapas rezultātu savā GeoTIFF failā, kura nosaukums ir saistāms ar šo apakšuzdevumu un individuālo lapu. Kā izskatās šūnu aizpildījums pie karšu lapu malām? Vai ir saglabājušies objekti ārpus kartes lapām?
+
+Vispirms izmēģināsim izveidot vienai lapai rastra failu
+```{r,izmeginam_rastru}
+LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+LV10m_10km_lapa3333 <- crop(LV10m_10km,lapa3333)
+priedes_lapa3333 <- lapa3333_mvr %>%
+  filter (s10 == 1) 
+rastrs_mezaudze_10m <- fasterize(priedes_lapa3333, LV10m_10km_lapa3333, background = 0)
+rastrs_mezaudze_10m[is.na(LV10m_10km_lapa3333)] <- NA
+LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+LV100m_10km_lapa3333 <- crop(LV100m_10km,lapa3333)
+rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km_lapa3333, methode = "sum")
+plot(rastrs_mezaudze_100m)
+```
+
+Izskatās pareizi, saliksim abas funkcijas vienā un izveidosim iteratīvo ciklu, lai iegūtu rezultātu katrai lapai, kā ievades failu izmantojam izvēlēto lapu listu
+```{r,izveidojam_funkciju_1apaksuzdevums}
+funkcija_parskatita <- function(ievades_fails) {
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_join(meza_centra_dati,lapa,left = FALSE)
+  mezaudze <- mvr_lapa %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  LV10m_10km_lapa <- crop(LV10m_10km,lapa)
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km_lapa, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km_lapa)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  LV100m_10km_lapa <- crop(LV100m_10km,lapa)
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km_lapa, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "uzd12.parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+}
+```
+```{r,rastri_lapam_1apaksuzdevums,warning=FALSE}
+system.time(sapply(lapas_parqueti,funkcija_parskatita))
+```
+Atbilde: Šūnu aizpildījums pie lapu malām izskatās pilnīgs, bet objekti ārpus lapu malām nav saglabājušies
+```{r,merge}
+Rastrs_lapa3333 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333uzd12.tif")
+Rastrs_lapa3334 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334uzd12.tif")
+Rastrs_lapa3343 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343uzd12.tif")
+Rastrs_lapa3344 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344uzd12.tif")
+pilna_teritorija <- merge(Rastrs_lapa3333,Rastrs_lapa3334,Rastrs_lapa3343,Rastrs_lapa3344)
+plot(pilna_teritorija)
+```
+
+```{r,izveidojam_funkciju}
+funkcija_parskatita <- function(ievades_fails) {
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_join(meza_centra_dati,lapa,left = FALSE)
+  mezaudze <- mvr_lapa %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  LV10m_10km_lapa <- crop(LV10m_10km,lapa)
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km_lapa, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km_lapa)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  LV100m_10km_lapa <- crop(LV100m_10km,lapa)
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km_lapa, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "uzd12.parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+  Rastrs_lapa3333 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333uzd12.tif")
+Rastrs_lapa3334 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334uzd12.tif")
+Rastrs_lapa3343 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343uzd12.tif")
+Rastrs_lapa3344 <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344uzd12.tif")
+pilna_teritorija <- merge(Rastrs_lapa3333,Rastrs_lapa3334,Rastrs_lapa3343,Rastrs_lapa3344)
+plot(pilna_teritorija)
+  finish <- Sys.time()
+}
+```
+```{r,rastri_lapam13,warning=FALSE}
+system.time(sapply(lapas_parqueti,funkcija_parskatita))
+```
+Atbilde 1.3. Apvienotajā slānī nav redzamas karšu lapu robežas, redzama ir tikai izvēlētās teritorijas ārējā robeža.
+
+2.1. solis: sāciet iteratīvo ciklu, kurā, izmantojot clipping iegūstiet MVR datus ar apstrādājamo kartes lapu (šis ir sākums laika mērogošanai). Kāds ir objektu skaits katrā kartes lapā, kā tas saistās ar iepriekšējo apakšuzdevumu? Ārpus cikla apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
+
+```{r,clipping}
+clipping_funkcija <- function(ievades_fails){
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_intersection(meza_centra_dati,lapa)
+  plot(mvr_lapa["geometry"])
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "clipping.parquet"))
+  st_write_parquet(mvr_lapa,izvades_fails)
+  finish <- Sys.time()
+}
+```
+```{r,mvrdati_lapas_clipping_21,warning=FALSE}
+system.time(sapply(lapas_parqueti,clipping_funkcija))
+```
+```{r,ielasam clipping lapas}
+lapa3333_clipping <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333clipping.parquet")
+lapa3333_clipping
+lapa3334_clipping <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334clipping.parquet")
+lapa3334_clipping
+lapa3343_clipping <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343clipping.parquet")
+lapa3343_clipping
+lapa3344_clipping <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344clipping.parquet")
+lapa3344_clipping
+```
+
+Atbilde 2.1: Objektu skaits katrā lapā sakrīt ar iepriekšējā uzdevumā iegūto objektu skaitu, objekti atrodas visā šūnā, arī pie robežām, bet tie neiziet ārpus šūnas kā tas bija 1. apakšuzdevumā. St_intersection izgrieza nogabalus pa kartes lapas robežu, kas nozīmē, ka ir mainījusies objektu, kas atrodas uz lapas robežām platība un perimetrs
+
+2.2. solis: izmantojiet pārskatīto funkciju no uzdevuma sākuma, lai saglabātu katras karšu lapas rezultātu savā GeoTIFF failā, kura nosaukums ir saistāms ar šo apakšuzdevumu un individuālo lapu. Kā izskatās šūnu aizpildījums pie karšu lapu malām? Vai ir saglabājušies objekti ārpus kartes lapām?
+```{r,izveidojam_funkciju_clipping_22}
+funkcija_parskatita_clipping <- function(ievades_fails) {
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_intersection(meza_centra_dati,lapa)
+  mezaudze <- mvr_lapa %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  LV100m_10km_lapa <- crop(LV100m_10km,lapa)
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km_lapa, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "uzd22.parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+}
+```
+```{r,rastri_lapam_22,warning=FALSE}
+system.time(sapply(lapas_parqueti,funkcija_parskatita_clipping))
+```
+Atbilde 2.2: Lapas malas ir aizpildītas pilnīgi, rezultāti no 1.2. iegūtajiem neatšķiras. Objekti ārpus lapas nebija. Izmantojot st_intersection var iegūt precīzākas platības nogabaliem, kas iekļaujas konkrētajā lapā, kā arī tā, kā intersect izgriež datus pa lapu robežu - izveido objektu, kas ir kopīgs abām daļām, tad nav nepieciešams 10m rastru izgriezt pa lapas robežām, bet lai savienotu rastrus savā starpā 100m rastru tāpat ir nepieciešams izgriezt. 10m rastra neizgriešana ievērojami palēnina apstrādes procesu, turklāt mēs neaprēķinām priežu nogabalu platību 10m šūnā, bet skatamies vai 10m šūnā ir konkrētais objekts. Līdz ar to spatial_join iedod to pašu rezultātu, bet ātrāk.
+
+2.3. solis: apvienojiet iteratīvajā ciklā radītos GeoTIFF failus vienā slānī, kura nosaukums ir saistāms ar apakšuzdevumu (laika mērogošanas beigas). Vai apvienotajā slānī ir redzamas karšu lapu robežas? Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+```{r,izveidojam_funkciju_clipping}
+funkcija_parskatita_clipp <- function(ievades_fails) {
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_intersection(meza_centra_dati,lapa)
+  mezaudze <- mvr_lapa %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  LV100m_10km_lapa <- crop(LV100m_10km,lapa)
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km_lapa, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "uzd22.parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+  Rastrs_lapa3333_clipp <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333uzd22.tif")
+Rastrs_lapa3334_clipp <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334uzd22.tif")
+Rastrs_lapa3343_clipp <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343uzd22.tif")
+Rastrs_lapa3344_clipp <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344uzd22.tif")
+pilna_teritorija <- merge(Rastrs_lapa3333_clipp,Rastrs_lapa3334_clipp,Rastrs_lapa3343_clipp,Rastrs_lapa3344_clipp)
+plot(pilna_teritorija)
+ writeRaster(pilna_teritorija, "otrais_apaksuzdevums", format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+}
+```
+```{r,rastri_lapam_23,warning=FALSE}
+system.time(sapply(lapas_parqueti,funkcija_parskatita_clipp))
+```
+Atbilde 2.3: Lapu robežas nav redzamas, vērtības sakrīt ar 1.3. iegūtajām vērtībām
+
+3.1. solis: sāciet iteratīvo ciklu, kurā, izmantojot spatial filtering iegūstiet MVR datus ar apstrādājamo kartes lapu (šis ir sākums laika mērogošanai). Kāds ir objektu skaits katrā kartes lapā, kā tas saistās ar iepriekšējo apakšuzdevumu? Ārpus cikla apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
+```{r,filtering}
+filtering_funkcija <- function(ievades_fails){
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_filter(meza_centra_dati,lapa,.pred = st_intersects)
+  plot(mvr_lapa["geometry"])
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "filter.parquet"))
+  st_write_parquet(mvr_lapa,izvades_fails)
+  finish <- Sys.time()
+}
+```
+```{r,mvrdati_lapas_clipping_31,warning=FALSE}
+system.time(sapply(lapas_parqueti,filtering_funkcija))
+```
+```{r,ielasam filtering lapas}
+lapa3333_filter <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333filter.parquet")
+lapa3333_filter
+lapa3334_filter <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334filter.parquet")
+lapa3334_filter
+lapa3343_filter <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343clipping.parquet")
+lapa3343_filter
+lapa3344_filter <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344filter.parquet")
+lapa3344_filter
+```
+Atbilde 3.1: Objektu skaits sakrīt ar iepriekšējos apakšzudevumos iegūtajiem objektu skaitiem, lapas malas ir aizpildītas pilnībā, iekļauti ir objekti, kas atrodas uz lapas malas robežām, objekti iziet ārpus lapas malas robežām, tāpēc nepieciešams izgriezt 10m šūnas konkrētajai lapai, lai nebūtu objektu pārklāšanās.
+
+3.2. solis: izmantojiet pārskatīto funkciju no uzdevuma sākuma, lai saglabātu katras karšu lapas rezultātu savā GeoTIFF failā, kura nosaukums ir saistāms ar šo apakšuzdevumu un individuālo lapu. Kā izskatās šūnu aizpildījums pie karšu lapu malām? Vai ir saglabājušies objekti ārpus kartes lapām?
+```{r,izveidojam_funkciju_filter}
+funkcija_parskatita_filter <- function(ievades_fails) {
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_filter(meza_centra_dati,lapa,.pred = st_intersects)
+  mezaudze <- mvr_lapa %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  LV10m_10km_lapa <- crop(LV10m_10km,lapa)
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km_lapa, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km_lapa)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  LV100m_10km_lapa <- crop(LV100m_10km,lapa)
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km_lapa, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "uzd32.parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+}
+```
+```{r,rastri_lapam_filter,warning=FALSE}
+system.time(sapply(lapas_parqueti,funkcija_parskatita_filter))
+```
+Atbilde 3.2: Lapas aizpildītas pilnīgi, objekti ārpus lapu malām nav saglabājušies
+3.3. solis: apvienojiet iteratīvajā ciklā radītos GeoTIFF failus vienā slānī, kura nosaukums ir saistāms ar apakšuzdevumu (laika mērogošanas beigas). Vai apvienotajā slānī ir redzamas karšu lapu robežas? Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+```{r,izveidojam_funkciju_filter33}
+funkcija_parskatita_filter33 <- function(ievades_fails) {
+  starts <- Sys.time()
+  lapa <- st_read_parquet(ievades_fails)
+  mvr_lapa <- st_filter(meza_centra_dati,lapa,.pred = intersects)
+  mezaudze <- mvr_lapa %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  LV10m_10km_lapa <- crop(LV10m_10km,lapa)
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km_lapa, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km_lapa)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  LV100m_10km_lapa <- crop(LV100m_10km,lapa)
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km_lapa, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  ievades_nosaukums <- file_path_sans_ext(basename(ievades_fails))
+  izvades_fails <- file.path(paste0(ievades_nosaukums, "uzd32.parquet"))
+  writeRaster(rastrs_mezaudze_100m, izvades_fails, format = "GTiff", overwrite = TRUE)
+  Rastrs_lapa3333_filter <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3333uzd32.tif")
+Rastrs_lapa3334_filter <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3334uzd32.tif")
+Rastrs_lapa3343_filter <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3343uzd32.tif")
+Rastrs_lapa3344_filter <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd05\\lapa3344uzd32.tif")
+pilna_teritorija <- merge(Rastrs_lapa3333_filter,Rastrs_lapa3334_filter,Rastrs_lapa3343_filter,Rastrs_lapa3344_filter)
+plot(pilna_teritorija)
+ writeRaster(pilna_teritorija, "tresais_apaksuzdevums", format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+}
+```
+```{r,rastri_lapam_3.3filter,warning=FALSE}
+system.time(sapply(lapas_parqueti,funkcija_parskatita_filter33))
+```
+Atbilde 3.3: Lapu malu robežas nav redzamas, vērtības sakrīt ar pārējiem apakšuzdevumiem
+
+Ceturtais apakšuzdevums.
+4.1. solis: ar sevis izvēlētu pieeju atlasiet mežaudzes, kuras pieder kādai no izvēlētajām karšu lapām (sākums laika mērogošanai).
+
+4.2. solis: ieviesiet funkciju atlasītajām mežaudzēm bez iteratīvā procesa, bet nodrošinot rezultējošā rastra aptveri tikai izvēlētajām kartes lapām (beigas laika mērogošanai). Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+
+Atbilde: Ja es pareizi sapratu apakšuzdevumu, tad tas ir izpildīts jau gatavojoties pirmajam apakšuzdevumam, izvēlētā pieeja ir spatial_join, vērtības sakrita, izmēģināju ar argumentu st_within, tad lapu malu aizpildījums nebija pilnīgs, jo neiekļāva objektus uz lapas robežām.
+Piektais apakšuzdevums.
+5.1. solis: ieviesiet funkciju visai MVR informācijai (sākums laika mērogošanai).
+
+
+```{r,funkcija_visai_mvr}
+ievades_fails <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\tks93_50km.parquet")
+ievades_fails <- st_transform(lapas, crs = 3059)
+funkcija_5uzd <- function(ievades_fails){
+  starts <- Sys.time()
+  mvr_lapa <- st_join(meza_centra_dati,ievades_fails)
+  mezaudze <- mvr_lapa %>%
+    filter(s10 == 1)
+  LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+  rastrs_mezaudze_10m <- fasterize(mezaudze, LV10m_10km, background = 0)
+  rastrs_mezaudze_10m[is.na(LV10m_10km)] <- NA
+  LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+  rastrs_mezaudze_100m <- resample(rastrs_mezaudze_10m,LV100m_10km, methode = "sum")
+  plot(rastrs_mezaudze_100m)
+  writeRaster(rastrs_mezaudze_100m, "5uzdevums", format = "GTiff", overwrite = TRUE)
+  finish <- Sys.time()
+  izveletas_lapas <- ievades_fails %>%
+    filter(NUMURS == 3333 | NUMURS == 3334 | NUMURS == 3343 | NUMURS == 3344)
+  plot(izveletas_lapas["NUMURS"])
+  izveleta_teritorija <- crop(rastrs_mezaudze_100m,izveletas_lapas)
+  plot(izveleta_teritorija)
+  writeRaster(izveleta_teritorija, "52uzdevums", format = "GTiff", overwrite = TRUE)
+}
+```
+```{r,5uzd_funkcija}
+system.time(funkcija_5uzd(ievades_fails))
+```
+
+5.2. solis: no rezultējošā slāņa izgrieziet tikai to daļu, kas attiecas uz izvēlētajām karšu lapām un beidziet laika mērogošanu. Ja šis solis ir jau iestrādāts funkcijā, tad mērogojiet tikai pašu funkciju.
+
+6. Sestais - jaudīgiem datoriem un dažādu pieeju izmēģināšanai. Saistiet atbilstošo mežaudžu informāciju ar 100 m tīklu no projekta repozitorija un izveidojiet projekta repozitorijā esošajam 100 m rastra tīklam atbilstošu rastru pēc šūnu novietojuma un vērtībām. Kad iegūstat salīdzināmu rezultātu, mērogojiet tā izpildei nepieciešamo laiku. Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+```{r,sestais_apaksuzdevums,warning=FALSE}
+m100_tikls <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\tikls100_sauzeme.parquet")
+m100_tikls <- st_transform(m100_tikls, crs = 3059)
+savienots <- st_join(meza_centra_dati,m100_tikls,left=FALSE)
+plot(savienots["geometry"])
+priezu_audzes <- savienots %>% filter(s10 == 1)
+LV10m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV10m_10km.tif")
+rastrs_mezaudze_10m_5uzd <- fasterize(priezu_audzes, LV10m_10km, background = 0)
+rastrs_mezaudze_10m_5uzd[is.na(LV10m_10km)] <- NA
+LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+rastrs_mezaudze_100m_5uzd <- resample(rastrs_mezaudze_10m_5uzd,LV100m_10km, methode = "sum")
+plot(rastrs_mezaudze_100m_5uzd)
+writeRaster(rastrs_mezaudze_100m_5uzd, "5uzd6apaksuzdevums", format = "GTiff", overwrite = TRUE)
+```
+Apskatīsimies kādu rezultātu iegūstam atšķirīgā veidā - izsakot priedes īpatsvaru no šķērslaukuma, kad nogabalā priede kā valdošā suga ir vismaz 0.9 un šos rezultātus rastarizējot uz 100m rastru. Padodos - mēģināju apskatīties ko iegūšu šādā veidā:
+m100_tikls <- st_read_parquet("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\tikls100_sauzeme.parquet")
+m100_tikls <- st_transform(m100_tikls, crs = 3059)
+savienots2 <- st_join(meza_centra_dati,m100_tikls,left=FALSE)
+savienots2 <- savienots2 %>% mutate (priedes_skerslaukums = 
+ifelse(s10 %in% c("1", "14", "22"), g10, 0) +
+ifelse(s11 %in% c("1", "14", "22"), g11, 0) +
+ifelse(s12 %in% c("1", "14", "22"), g12, 0) +
+ifelse(s13 %in% c("1", "14", "22"), g13, 0) +
+ifelse(s14 %in% c("1", "14", "22"), g14, 0))
+savienots2 <- savienots2 %>% mutate (kop_skerslaukums = g10+g11+g12+g13+g14)
+savienots2 <- savienots2 %>% mutate (priedes_prop = priedes_skerslaukums/kop_skerslaukums)
+savienots2 <- savienots2 %>% mutate(PriezuMezi = case_when(priedes_prop >= 0.90 ~ 1, priedes_prop < 0.90 & !is.na(priedes_prop) ~ 0, TRUE ~ NA_real_))
+LV100m_10km <- raster("C:\\Users\\Ozols\\Documents\\HiQBioDiv_macibas\\Uzd03\\LV100m_10km.tif")
+priezu_rastrs <- rasterize(savienots2,LV100m_10km, field = "PriezuMezi", fun = mean, background = 0)
+priezu_rastrs[is.na(LV100m_10km)] <- NA
+plot(priezu_rastrs)
+Process griezās vairāk par 12h bez rezultātiem.
