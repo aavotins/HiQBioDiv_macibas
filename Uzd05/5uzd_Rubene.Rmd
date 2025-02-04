@@ -30,8 +30,6 @@ Ielasu karti, no kuras jāizvēlas četras blakus esošas karšu lapas, kā arī
 ```{r}
 karte <- st_read_parquet("../ref_vektori/tks93_50km.parquet")
 mezi <- st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
-#ref10m <- rast("../ref_rastri/LV10m_10km.tif")
-#ref100m <- rast("../ref_rastri/LV100m_10km.tif")
 ```
 
 Tā kā vēlāk šajā uzdevumā būs interesējoši skatīties uz lietām, kas notiek gar malām, būtu vērtīgi iemācīties izmantot pakotni leaflet. To arī varu izmantot lapu izvēlei.
@@ -41,8 +39,6 @@ Nav svarīgi, kā izvēlēties lapas - paņemšu lapas kaut kur pa vidu, jo str�
 ```{r, cache = TRUE}
 crs(karte)
 kartelatlon <- st_transform(karte, crs = 4326) # leaflet pieprasa WGS84
-#mezilatlon <- st_transform(mezi, crs = 4326) # transformēšanas rezultātā radušās problēmas ar ģeometriju pārklāšanos, tas jāatrisina
-#mezilatlon <- st_make_valid(mezi)
 
 leaflet(kartelatlon) %>%
   addTiles() %>%  
@@ -70,19 +66,15 @@ for (nr in names(lapas_list)) {
 lapas_list_paths <- list.files(pattern = "^lapa\\d{4}\\.parquet$", full.names = TRUE)
 ```
 
-Jāpārvērš arī referenču crs, lai viss ir vienādi
-
-```{r, warning = FALSE, cache = TRUE}
-#ref10m <- project(ref10m, "EPSG:4326")
-#ref100m <- project(ref100m, "EPSG:4326")
-# spatRaster objekti, tāpēc nevar pielietot st_transform
-rm(karte, lapas_list)
+```{r, warning = FALSE}
+# Noņemu lieko
+rm(data, karte, kartelatlon, file_name, nr)
 ```
 
-Iepriekšējā uzdevumā izveidotā funkcija, kurā bija nepieciešams veikt dažas izmaiņas. Ja pareizi esmu sapratusi uzdevuma būtību, tad references rastrus vajadzīgs apgriezt nevis ar lapu, bet ar atlasīto meža datu extent (crop to tā dara pēc nokusējuma) Tāds domu gājiens, jo uzdevuma premisē bija runa par rastru pārklāšanos - ja rastru apgriezīšu uzreiz ar pašu lapu, tad tiks daļēji pazaudēta informācija par uz lapas robežām esošajiem poligoniem, ja tādi būs radušies. Tas nozīmē, ka būs nepieciešams saglabāt arī izveidotos meža vektorfailus katrā uzdevumā
+Iepriekšējā uzdevumā izveidotā funkcija, kurā bija nepieciešams veikt dažas izmaiņas. Ja pareizi esmu sapratusi uzdevuma būtību, tad references rastrus vajadzīgs apgriezt nevis ar lapu, bet ar atlasīto meža datu extent (crop to tā dara pēc nokusējuma) Tāds domu gājiens, jo uzdevuma premisē bija runa par rastru pārklāšanos - ja rastru apgriezīšu uzreiz ar pašu lapu, tad var tikt daļēji pazaudēta informācija par uz lapas robežām esošajiem poligoniem, ja tādi būs radušies. Tas nozīmē, ka būs nepieciešams saglabāt arī izveidotos meža vektorfailus katrā uzdevumā
 
-```{r}
-dir.create("5uzd_faili") # visiem failiem lai mazinātu haosu
+```{r, warning = FALSE}
+dir.create("5uzd_faili") # mape visiem failiem lai mazinātu haosu
 
 mana_funkcija <- function(mezs_dati, koku_suga, uzd_nr) {
 numurs <- str_extract(mezs_dati, "(?<=lapa)\\d+")
@@ -102,6 +94,8 @@ priezu_mezi_100m <-
 }
 ```
 
+
+
 # 1) Spatial join
 
 1.1. solis: izmantojot spatial join, saistiet MVR datus ar izvēlētajām karšu lapām (šis ir sākums laika mērogošanai). Kāds ir objektu skaits pirms un pēc savienošanas? Apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
@@ -109,14 +103,10 @@ priezu_mezi_100m <-
 Izmantoju spatial join.
 
 ```{r, message = FALSE}
-# bet vispirms jātiek galā ar crs nesakritībām
-st_crs(lapas_list[["3331"]])
-st_crs(mezi)
-# ir vienādas, bet cikls mazliet zemāk tāpat meta error par nesakritībām...
-mezi <- st_transform(mezi, st_crs(lapas_list[["3331"]]))
-
 for (i in lapas_list_paths) {
   lapa <- st_read_parquet(i)
+  mezi <-st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
+  mezi <- st_transform(mezi, st_crs(lapa)) # crs it kā ir ir vienādas, bet cikls bez šī tāpat meta error par nesakritībām...
   fails <- st_join(mezi, lapa, left = FALSE)
   basename <- tools::file_path_sans_ext(basename(i))
   nosaukums <- file.path("5uzd_faili", paste0(basename,"mezi_1uzd.parquet"))
@@ -126,10 +116,13 @@ for (i in lapas_list_paths) {
 # vienkāršā veidā paskatīšos vienu karti, vai izskatās ok
 parbaude <- st_read_parquet("5uzd_faili/lapa3331mezi_1uzd.parquet")
 plot(st_geometry(parbaude))
-rm(pabraude)
+rm(parbaude,basename,i,nosaukums, fails, lapa, lapas)
 
-# saglabāto failu saraksts ko pielietot ciklā
+# saglabāto failu saraksts ko vēlāk pielietot ciklā
 uzd1_mezi_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}mezi_1uzd\\.parquet$", full.names = TRUE)
+
+# cik objektu katrā lapā?
+uzd1_mezi <- map(uzd1_mezi_file_paths, st_read_parquet)
 ```
 
 Pirms savienošanas objektā mezi ir 505654 objekti, katrā lapā piederīgi ir 15729, 29042, 33449 un 32904 objekti.
@@ -142,19 +135,21 @@ lapa3331 <- st_transform(lapas_list[["3331"]], crs = 4326)
 lapa3332 <- st_transform(lapas_list[["3332"]], crs = 4326)
 lapa3333 <- st_transform(lapas_list[["3333"]], crs = 4326)
 lapa3334 <- st_transform(lapas_list[["3334"]], crs = 4326)
-lapa3331uzd1 <- st_transform(uzd1_1[[1]], crs = 4326)
+
+lapa3331uzd1 <- st_read_parquet("5uzd_faili/lapa3331mezi_1uzd.parquet")
+lapa3331uzd1 <- st_transform(lapa3331uzd1, crs = 4326)
 
 leaflet() %>%
   addTiles() %>%
   addPolygons(data = lapa3331, color = "blue") %>%
   addPolygons(data = lapa3331uzd1, color = "green") 
-
-rm(lapa3331uzd1)
 ```
 
 Kartes lapai piederīgie objekti, kā jau bija sagaidāms no funkcijas st_join, ir visi, kuri kaut vai daļēji ietilpst kartes lapā. Tātad iekļauti arī tie objekti, kas atrodas uz lapas malām
 
-Saglabāšu 
+```{r}
+rm(lapa3331uzd1, uzd1_mezi)
+```
 
 1.2. solis - iteratīvā ciklā izmantojiet pārskatīto funkciju no uzdevuma sākuma, lai saglabātu katras karšu lapas rezultātu savā GeoTIFF failā, kura nosaukums ir saistāms ar šo apakšuzdevumu un individuālo lapu. Kā izskatās šūnu aizpildījums pie karšu lapu malām? Vai ir saglabājušies objekti ārpus kartes lapām?
 
@@ -167,7 +162,7 @@ for (i in seq_along(uzd1_mezi_file_paths)) {
 
 rezultats <- rast("5uzd_faili/lapa3331_1uzd_priedes100m.tif")
 plot(rezultats) # Ir ok
-rm(rezultats)
+rm(rezultats, i)
 ```
 
 1.3 solis  apvienot izveidotos rastrus vienā slānī
@@ -177,7 +172,7 @@ Sākumā gribu paskatīties, kā izskatās divas no lapām, jo sagaidāma pārkl
 ```{r}
 # pirmais rastrs
 lapa3331_priedes_1uzd <- rast("5uzd_faili/lapa3331_1uzd_priedes100m.tif")
-lapa3331_priedes_1uzd <- project(lapa3332_priedes_1uzd, st_crs(lapa3331)$wkt)
+lapa3331_priedes_1uzd <- project(lapa3331_priedes_1uzd, st_crs(lapa3331)$wkt)
 
 #otrais rastrs
 lapa3332_priedes_1uzd <- rast("5uzd_faili/lapa3332_1uzd_priedes100m.tif")
@@ -187,28 +182,30 @@ leaflet() %>%
   addTiles() %>%
   addRasterImage(lapa3331_priedes_1uzd, group = "rastrs3331") %>%
   addRasterImage(lapa3332_priedes_1uzd, group = "rastrs3332") %>%
-  addPolygons(data = lapa3331, color = "blue") %>%
-  addPolygons(data = lapa3332, color = "blue") %>%
+  addPolygons(data = lapa3331, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3332, color = "blue", group = "lapas") %>%
   addLayersControl(
-    overlayGroups = c("rastrs3331","rastrs3332"),
+    overlayGroups = c("rastrs3331","rastrs3332","lapas"),
     options = layersControlOptions(collapsed = FALSE))
 ```
 
-Nu vispār neizskatās baigi labi, ir dažādi malu platumi. Bet redzams, ka rastrs ir arī ārpus lapas, kas bija sagaidāms, kā arī tas, ka vietās, kur rastri pārklājas, abos rastros vērtības nesakrīt. Pie malām vērtības vienmēr ir mazas, jo poligoni, kas ir bijuši tieši ārpus atlasītajiem mežiem, nav ņemti vērā (tie šīs malu vērtības teorētiski daļā gadījumu varēja ietekmēt)
+Rastriem ir dažādi malu platumi. Bet redzams, ka rastrs ir arī ārpus lapas, kas bija sagaidāms, kā arī tas, ka vietās, kur rastri pārklājas, abos rastros vērtības nesakrīt. Pie malām vērtības vienmēr ir mazas, jo poligoni, kas ir bijuši tieši ārpus atlasītajiem mežiem, nav ņemti vērā (tie šīs malu vērtības teorētiski daļā gadījumu varēja ietekmēt, kā redzams vietās, kur malas pārklājas).
 
-Vai tiem dažādajiem malu platumiem ir saistība ar ar to, ka mētājos pa dažādām koordinātu sistēmām, jo leaflet karte pieprasa WGS84 (esmu par to iepriekš domājusi, cik daudz un kādas kļūdas var rasties, transformējot crs, labprāt to apmācību laikā apspriestu)? Vai tas vienkārši ir rastra šūnu izvietojuma dēļ? 
+Vai tiem dažādajiem malu platumiem ir saistība ar ar to, ka mētājos pa dažādām koordinātu sistēmām, jo leaflet karte pieprasa WGS84 (esmu par to iepriekš domājusi, cik daudz un kādas kļūdas var rasties, transformējot crs, labprāt to apmācību laikā apspriestu)? Vai tas vienkārši ir rastra šūnu izvietojuma dēļ vai uz lapas malām esošo poligonu dēļ? 
 
-Negribēju visu laiku darboties WGS84 koordinātu sistēmā, jo premisē minēts, ka projektā pastāvīgi strādāsim ar LKS-92
+Negribēju visu laiku darboties WGS84 koordinātu sistēmā, jo premisē minēts, ka projektā pastāvīgi strādāsim ar LKS-92.
 
 
-Izveidoju sarakstu ar ceļiem uz visiem radītajiem failiem, tad apvienoju rastrus un apskatu rezultātu.
-
-Jādomā par to, ko darīt ar malām, kuras pārklājas. Negribu, lai viena rastra vērtības ir svarīgākas par otrām, jo, kā redzams augstāk kartē, rastri krietni iestiepjas arī blakus lapā. Ttāpēc izmantošu terra:mosaic ar fun = max, lai ņemtu vērā maksimālo vērtību no pārklāšanās vietām (centīšos paskaidrot domu, bet kaut kā nesanāk veikli - ja jau vienā lapā mežu īpatsvars tika aprēķināts, tad tas noteikti ir vismaz tik liels konkrētajā šūnā)
+Izveidoju sarakstu ar ceļiem uz visiem radītajiem failiem
 
 ```{r}
 uzd1_priedes_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}_1uzd_priedes100m\\.tif$", full.names = TRUE)
 uzd1_priedes <- lapply(uzd1_priedes_file_paths, rast)
+```
 
+Tagad rastri jāapvieno. Jādomā par to, ko darīt ar malām, kuras pārklājas. Negribu, lai viena rastra vērtības ir svarīgākas par otrām, ko dara funkcija merge, jo, kā redzams augstāk kartē, rastri krietni iestiepjas arī blakus lapā. Tāpēc izmantošu terra:mosaic ar fun = max, lai ņemtu vērā maksimālo vērtību no pārklāšanās vietām (centīšos paskaidrot domu, bet kaut kā nesanāk veikli - ja jau vienā lapā mežu īpatsvars tika aprēķināts, tad tas noteikti ir vismaz tik liels konkrētajā šūnā, kas ir precīzākais, ko šobrīd varu iegūt)
+
+```{r}
 uzd1_priedes_merged <- do.call(mosaic, uzd1_priedes)
 plot(uzd1_priedes_merged)
 writeRaster(uzd1_priedes_merged, "Uzd1_priedes100m_merged.tif", overwrite = TRUE)
@@ -218,26 +215,29 @@ writeRaster(uzd1_priedes_merged, "Uzd1_priedes100m_merged.tif", overwrite = TRUE
 leaflet() %>%
   addTiles() %>%
   addRasterImage(uzd1_priedes_merged) %>%
-  addPolygons(data = lapa3331, color = "blue", group = "lapa") %>%
-  addPolygons(data = lapa3332, color = "blue", group = "lapa") %>%
-  addPolygons(data = lapa3333, color = "blue", group = "lapa") %>%
-  addPolygons(data = lapa3334, color = "blue", group = "lapa") %>%
+  addPolygons(data = lapa3331, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3332, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3333, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3334, color = "blue", group = "lapas") %>%
   addLayersControl(
-    overlayGroups = "lapa",
+    overlayGroups = "lapas",
     options = layersControlOptions(collapsed = FALSE))
 ```
 
-Neesmu droša, kas notiek ar augšējo kreiso lapu...
-Bet tā kopumā karšu lapu robežas izteikti nav redzamas, lai gan dažviet ir mazākas vērtības vietās, kur robežojas lapu malas. Man šķiet, ka strādājot būtu vērtīgi ieviest buferi, lai malās nekas nepazustu - jo šobrīd izskatās, ka, tā kā poligoni, kas ir bijuši tieši ārpus atlasītajiem mežiem, nav ņemti vērā, tad pie pašas malas kaut kāda informācija var būt zaudēta.
+Neesmu droša, kas notiek ar augšējo kreiso lapu... varbūt tur ir bijuši kādi plaši poligoni ārpus kartes lapas?
 
-Lai mērītu laiku, es visas uz apakšuzdevumiem tieši attiecināmās komandrindas sarakstīju kompakti (zemāk), ļoti vēlos atstāt visu savu domu gaitu, pārbaudes un bildītes (augstāk)
+Bet tā kopumā pēc savienošanas karšu lapu robežas izteikti nav redzamas, lai gan dažviet ir mazākas vērtības vietās, kur savstarpēji robežojas lapu malas. Man šķiet, ka strādājot būtu vērtīgi ieviest buferi, lai malās nekas nepazustu - jo šobrīd  poligoni, kas ir bijuši tieši ārpus atlasītajiem mežiem, nav ņemti vērā, līdz ar to pie pašas malas kaut kāda informācija var būt zaudēta.
 
-```{r, warning = FALSE}
+Lai mērītu laiku, es visas uz apakšuzdevumiem tieši attiecināmās komandrindas sarakstīju kompakti (zemāk), vēlos atstāt visu savu domu gaitu, pārbaudes un bildītes (augstāk)
+
+```{r, warning = FALSE, message = FALSE}
 SakumsUzd1 <- Sys.time()
 
 # 1.1. solis
 for (i in lapas_list_paths) {
   lapa <- st_read_parquet(i)
+  mezi <-st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
+  mezi <- st_transform(mezi, st_crs(lapa)) 
   fails <- st_join(mezi, lapa, left = FALSE)
   basename <- tools::file_path_sans_ext(basename(i))
   nosaukums <- file.path("5uzd_faili", paste0(basename,"mezi_1uzd.parquet"))
@@ -251,16 +251,202 @@ for (i in seq_along(uzd1_mezi_file_paths)) {
 
 # 1.3. solis
 uzd1_priedes_merged <- do.call(mosaic, uzd1_priedes)
+writeRaster(uzd1_priedes_merged, "Uzd1_priedes100m_merged.tif", overwrite = TRUE)
 
 BeigasUzd1 <- Sys.time()
 print(BeigasUzd1 - SakumsUzd1)
 ```
 
-šis viss aizņema mazliet vairāk nekā minūti.
+šis viss aizņema aptuveni 30 sekundes.
+
+```{r}
+rm(uzd1_priedes, basename, i, nosaukums, SakumsUzd1, BeigasUzd1, uzd1_mezi_file_paths, uzd1_priedes_file_paths,fails,lapa)
+```
+
+
 
 # 2) Clipping
 
+2.1. solis: sāciet iteratīvo ciklu, kurā, izmantojot clipping iegūstiet MVR datus ar apstrādājamo kartes lapu (šis ir sākums laika mērogošanai). Kāds ir objektu skaits katrā kartes lapā, kā tas saistās ar iepriekšējo apakšuzdevumu? Ārpus cikla apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
+
+Tagad tas pats, kas iepriekš, jāatkārto ar clipping, izmantojot funkciju st_intersects. Šī funkcija atgriež tikai tādas ģeometrijas, kurās x un y objekti savstarpēji pārklājas, līdz ar to sagaidāms, ka ģeometrijas tiks apgrieztas līdz ar lapas malām.
+
+```{r, warning = FALSE}
+for (i in lapas_list_paths) {
+  lapa <- st_read_parquet(i)
+  mezi <-st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
+  mezi <- st_transform(mezi, st_crs(lapa)) 
+  fails <- st_intersection(mezi, lapa)
+  basename <- tools::file_path_sans_ext(basename(i))
+  nosaukums <- file.path("5uzd_faili", paste0(basename,"mezi_2uzd.parquet"))
+  st_write_parquet(fails, nosaukums)
+}
+
+# saglabāto failu saraksts, ko vēlāk pielietot ciklā
+uzd2_mezi_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}mezi_2uzd\\.parquet$", full.names = TRUE)
+```
+
+```{r}
+uzd2_mezi <- map(uzd2_mezi_file_paths, st_read_parquet)
+```
+
+Katrā lapā piederīgi ir 15729, 29042, 33449 un 32904 objekti - tieši tāpat, kā ar funkciju st_join. Tas bija sagaidāms, jo, pat ja funkcija apgriež daļu objektu, to skaits paliek nemainīgs.
+
+Paskatīšos, kas notiek gar lapas malām
+
+```{r}
+lapa3331uzd2 <- st_read_parquet("5uzd_faili/lapa3331mezi_2uzd.parquet")
+lapa3331uzd2 <- st_transform(lapa3331uzd2, crs = 4326)
+
+leaflet() %>%
+  addTiles() %>%
+  addPolygons(data = lapa3331, color = "blue") %>%
+  addPolygons(data = lapa3331uzd2, color = "green") 
+```
+
+Kā jau bija gaidāms, funkcija ir apgriezusi visu, kas atrodas ārpus lapas.
 
 
+2.2. solis: izmantojiet pārskatīto funkciju no uzdevuma sākuma, lai saglabātu katras karšu lapas rezultātu savā GeoTIFF failā, kura nosaukums ir saistāms ar šo apakšuzdevumu un individuālo lapu. Kā izskatās šūnu aizpildījums pie karšu lapu malām? Vai ir saglabājušies objekti ārpus kartes lapām?
+
+Pielietoju funkciju:
+
+```{r}
+for (i in seq_along(uzd2_mezi_file_paths)) {
+  mana_funkcija(mezs_dati = uzd2_mezi_file_paths[i], koku_suga = 1, uzd_nr = "2uzd")
+}
+```
+
+Atkal uztaisīšu interaktīvo karti, lai paskatītos uz malām:
+
+```{r}
+# pirmais rastrs
+lapa3331_priedes_2uzd <- rast("5uzd_faili/lapa3331_2uzd_priedes100m.tif")
+lapa3331_priedes_2uzd <- project(lapa3331_priedes_2uzd, st_crs(lapa3331)$wkt)
+
+#otrais rastrs
+lapa3332_priedes_2uzd <- rast("5uzd_faili/lapa3332_2uzd_priedes100m.tif")
+lapa3332_priedes_2uzd <- project(lapa3332_priedes_2uzd, st_crs(lapa3331)$wkt)
+
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(lapa3331_priedes_2uzd, group = "rastrs3331") %>%
+  addRasterImage(lapa3332_priedes_2uzd, group = "rastrs3332") %>%
+  addPolygons(data = lapa3331, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3332, color = "blue", group = "lapas") %>%
+  addLayersControl(
+    overlayGroups = c("rastrs3331","rastrs3332","lapas"),
+    options = layersControlOptions(collapsed = FALSE))
+```
+Kā jau sagaidāms, rastri apgriezti līdz ar lapas malām. Tomēr mani mulsina tas, ka starp lapām ir neaizpildīta robeža, kas ir šaurāka nekā 100 m pikselis - kā tā var būt, ja izmantoju vienu references rastru? Atkal kaut kas ar crs transformēšanu saistīts? Pa vidu dažās vietās ir nobīdes, kas rezultējas pikseļu iztrūkumos.
+
+Mēģināšu apvienot rastrus un tad jau redzēs.
+
+
+2.3. solis: apvienojiet iteratīvajā ciklā radītos GeoTIFF failus vienā slānī, kura nosaukums ir saistāms ar apakšuzdevumu (laika mērogošanas beigas). Vai apvienotajā slānī ir redzamas karšu lapu robežas? Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+
+Tā kā rastri šoreiz nepārklājas, mēģināšu pielietot merge funkciju, kam jābūt ātrākai.
+
+```{r}
+uzd2_priedes_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}_2uzd_priedes100m\\.tif$", full.names = TRUE)
+uzd2_priedes <- lapply(uzd2_priedes_file_paths, rast)
+
+uzd2_priedes_merged <- do.call(merge, uzd2_priedes)
+writeRaster(uzd2_priedes_merged, "Uzd2_priedes100m_merged.tif", overwrite = TRUE)
+```
+
+Skatos, kas sanācis
+
+```{r}
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(uzd2_priedes_merged) %>%
+  addPolygons(data = lapa3331, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3332, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3333, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3334, color = "blue", group = "lapas") %>%
+  addLayersControl(
+    overlayGroups = "lapsa",
+    options = layersControlOptions(collapsed = FALSE))
+```
+
+Robežlīnijas vairs nav redzamas un rastrs ir vienlaidus. Acīmredzot tiešām problēma ir crs transformēšanā...
+
+Laika mērīšanai:
+
+```{r, warning = FALSE, message = FALSE}
+SakumsUzd2 <- Sys.time()
+
+# 1.1. solis
+for (i in lapas_list_paths) {
+  lapa <- st_read_parquet(i)
+  mezi <-st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
+  mezi <- st_transform(mezi, st_crs(lapa)) 
+  fails <- st_intersection(mezi, lapa)
+  basename <- tools::file_path_sans_ext(basename(i))
+  nosaukums <- file.path("5uzd_faili", paste0(basename,"mezi_2uzd.parquet"))
+  st_write_parquet(fails, nosaukums)
+}
+
+# 1.2. solis
+for (i in seq_along(uzd2_mezi_file_paths)) {
+  mana_funkcija(mezs_dati = uzd2_mezi_file_paths[i], koku_suga = 1, uzd_nr = "2uzd")
+}
+
+# 1.3. solis
+uzd1_priedes_merged <- do.call(mosaic, uzd2_priedes)
+writeRaster(uzd2_priedes_merged, "Uzd2_priedes100m_merged.tif", overwrite = TRUE)
+
+BeigasUzd2 <- Sys.time()
+print(BeigasUzd2 - SakumsUzd2)
+```
+
+Viss kopā aizņēma pusotru minūti.
+
+```{r}
+rm(basename, i, nosaukums, SakumsUzd2, BeigasUzd2, uzd2_priedes_file_paths, uzd2_mezi_file_paths, fails, lapa, lapa3331_priedes_1uzd)
+```
+
+
+
+# 3) Spatial filtering
+
+3.1. solis: sāciet iteratīvo ciklu, kurā, izmantojot spatial filtering iegūstiet MVR datus ar apstrādājamo kartes lapu (šis ir sākums laika mērogošanai). Kāds ir objektu skaits katrā kartes lapā, kā tas saistās ar iepriekšējo apakšuzdevumu? Ārpus cikla apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
+
+Spatial filtering, funkcija st_filter
+
+```{r, warning = FALSE}
+for (i in lapas_list_paths) {
+  lapa <- st_read_parquet(i)
+  mezi <-st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
+  mezi <- st_transform(mezi, st_crs(lapa)) 
+  fails <- st_filter(mezi, lapa)
+  basename <- tools::file_path_sans_ext(basename(i))
+  nosaukums <- file.path("5uzd_faili", paste0(basename,"mezi_3uzd.parquet"))
+  st_write_parquet(fails, nosaukums)
+}
+
+# saglabāto failu saraksts, ko vēlāk pielietot ciklā
+uzd3_mezi_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}mezi_3uzd\\.parquet$", full.names = TRUE)
+```
+
+```{r}
+uzd3_mezi <- map(uzd3_mezi_file_paths, st_read_parquet)
+```
+
+Katrā lapā piederīgi ir 15729, 29042, 33449 un 32904 objekti - tieši tāpat, kā ar funkciju st_join. Tas bija sagaidāms, jo, pat ja funkcija apgriež daļu objektu, to skaits paliek nemainīgs.
+
+Paskatīšos, kas notiek gar lapas malām
+
+```{r}
+lapa3331uzd3 <- st_read_parquet("5uzd_faili/lapa3331mezi_2uzd.parquet")
+lapa3331uzd3 <- st_transform(lapa3331uzd3, crs = 4326)
+
+leaflet() %>%
+  addTiles() %>%
+  addPolygons(data = lapa3331, color = "blue") %>%
+  addPolygons(data = lapa3331uzd3, color = "green") 
+```
+```
 
 
