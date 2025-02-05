@@ -53,7 +53,7 @@ Izvēlējos lapas 3333, 3334, 3331 un 3332, ievietoju tās atsevišķā objektā
 lapas <- karte %>% filter(NUMURS %in% c(3333,3334,3331,3332))
 lapas_list <- split(lapas, lapas$NUMURS)
 ```
-'
+
 Lapas saglabāšu un tad izveidošu path sarakstu uz lapu failiem. Tādējādi būs iespējams nodrošināt failu ielasīšanu pašā funkcijā un pareizos failu nosaukumus izvades failā
 
 ```{r, warning = FALSE}
@@ -257,10 +257,10 @@ BeigasUzd1 <- Sys.time()
 print(BeigasUzd1 - SakumsUzd1)
 ```
 
-šis viss aizņema aptuveni 30 sekundes.
+Process aizņema aptuveni 30 sekundes.
 
 ```{r}
-rm(uzd1_priedes, basename, i, nosaukums, SakumsUzd1, BeigasUzd1, uzd1_mezi_file_paths, uzd1_priedes_file_paths,fails,lapa)
+rm(fails,lapa,lapa3331_priedes_1uzd, lapa3332_priedes_1uzd, uzd1_priedes, BeigasUzd1, SakumsUzd1, uzd1_mezi_file_paths, uzd1_priedes_file_paths)
 ```
 
 
@@ -284,9 +284,7 @@ for (i in lapas_list_paths) {
 
 # saglabāto failu saraksts, ko vēlāk pielietot ciklā
 uzd2_mezi_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}mezi_2uzd\\.parquet$", full.names = TRUE)
-```
 
-```{r}
 uzd2_mezi <- map(uzd2_mezi_file_paths, st_read_parquet)
 ```
 
@@ -366,7 +364,7 @@ leaflet() %>%
   addPolygons(data = lapa3333, color = "blue", group = "lapas") %>%
   addPolygons(data = lapa3334, color = "blue", group = "lapas") %>%
   addLayersControl(
-    overlayGroups = "lapsa",
+    overlayGroups = "lapas",
     options = layersControlOptions(collapsed = FALSE))
 ```
 
@@ -394,17 +392,17 @@ for (i in seq_along(uzd2_mezi_file_paths)) {
 }
 
 # 1.3. solis
-uzd1_priedes_merged <- do.call(mosaic, uzd2_priedes)
+uzd2_priedes_merged <- do.call(mosaic, uzd2_priedes)
 writeRaster(uzd2_priedes_merged, "Uzd2_priedes100m_merged.tif", overwrite = TRUE)
 
 BeigasUzd2 <- Sys.time()
 print(BeigasUzd2 - SakumsUzd2)
 ```
 
-Viss kopā aizņēma pusotru minūti.
+Viss kopā aizņēma aptuveni 2,5 minūtes.
 
 ```{r}
-rm(basename, i, nosaukums, SakumsUzd2, BeigasUzd2, uzd2_priedes_file_paths, uzd2_mezi_file_paths, fails, lapa, lapa3331_priedes_1uzd)
+rm(fails,lapa,lapa3331_priedes_2uzd, lapa3332_priedes_2uzd, lapa3331uzd2, uzd2_mezi, uzd2_priedes, BeigasUzd2, SakumsUzd2, uzd2_mezi_file_paths, uzd2_priedes_file_paths)
 ```
 
 
@@ -413,14 +411,14 @@ rm(basename, i, nosaukums, SakumsUzd2, BeigasUzd2, uzd2_priedes_file_paths, uzd2
 
 3.1. solis: sāciet iteratīvo ciklu, kurā, izmantojot spatial filtering iegūstiet MVR datus ar apstrādājamo kartes lapu (šis ir sākums laika mērogošanai). Kāds ir objektu skaits katrā kartes lapā, kā tas saistās ar iepriekšējo apakšuzdevumu? Ārpus cikla apskatiet katrai kartes lapai piederīgos objektus - vai tie atrodas tikai kartes lapas iekšienē, vai ir iekļauti visi objekti, kas ir uz kartes lapas robežām?
 
-Spatial filtering, funkcija st_filter
+Spatial filtering (izmanto objektu savstarpējo pārklāšanos) mērķiem pieejamas dažādas funkcijas ar dažādiem attiecību nosacījumiem, izvēlējos izmantot funkciju st_within, kas atgriež poligonus, kuri pilnībā ietilpst lapā. 
 
 ```{r, warning = FALSE}
 for (i in lapas_list_paths) {
   lapa <- st_read_parquet(i)
   mezi <-st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
   mezi <- st_transform(mezi, st_crs(lapa)) 
-  fails <- st_filter(mezi, lapa)
+  fails <- st_filter(mezi, lapa, .predicate = st_within)
   basename <- tools::file_path_sans_ext(basename(i))
   nosaukums <- file.path("5uzd_faili", paste0(basename,"mezi_3uzd.parquet"))
   st_write_parquet(fails, nosaukums)
@@ -428,18 +426,14 @@ for (i in lapas_list_paths) {
 
 # saglabāto failu saraksts, ko vēlāk pielietot ciklā
 uzd3_mezi_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}mezi_3uzd\\.parquet$", full.names = TRUE)
-```
 
-```{r}
 uzd3_mezi <- map(uzd3_mezi_file_paths, st_read_parquet)
 ```
 
-Katrā lapā piederīgi ir 15729, 29042, 33449 un 32904 objekti - tieši tāpat, kā ar funkciju st_join. Tas bija sagaidāms, jo, pat ja funkcija apgriež daļu objektu, to skaits paliek nemainīgs.
-
-Paskatīšos, kas notiek gar lapas malām
+Katrā lapā piederīgi ir 15271, 28223, 32753 un 32117 objekti - tas ir mazāk, nekā ar iepriekšējām divām funkcijām (par ~ 500 - 800 objektiem mazāk). Tas bija sagaidāms, jo st_within atlasa tikai objektus, kas pilnībā ietilpst lapā - tātad uz malām esošie objekti tiek atmesti.
 
 ```{r}
-lapa3331uzd3 <- st_read_parquet("5uzd_faili/lapa3331mezi_2uzd.parquet")
+lapa3331uzd3 <- st_read_parquet("5uzd_faili/lapa3331mezi_3uzd.parquet")
 lapa3331uzd3 <- st_transform(lapa3331uzd3, crs = 4326)
 
 leaflet() %>%
@@ -447,6 +441,205 @@ leaflet() %>%
   addPolygons(data = lapa3331, color = "blue") %>%
   addPolygons(data = lapa3331uzd3, color = "green") 
 ```
+
+Redzams, ka tiešām atlasīti tikai lapā pilnībā ietilstošie objekti.
+
+3.2. solis: izmantojiet pārskatīto funkciju no uzdevuma sākuma, lai saglabātu katras karšu lapas rezultātu savā GeoTIFF failā, kura nosaukums ir saistāms ar šo apakšuzdevumu un individuālo lapu. Kā izskatās šūnu aizpildījums pie karšu lapu malām? Vai ir saglabājušies objekti ārpus kartes lapām?
+
+Pielietoju funkciju:
+
+```{r}
+for (i in seq_along(uzd3_mezi_file_paths)) {
+  mana_funkcija(mezs_dati = uzd3_mezi_file_paths[i], koku_suga = 1, uzd_nr = "3uzd")
+}
 ```
+
+Kārtējā interaktīvā karte:
+
+```{r}
+# pirmais rastrs
+lapa3331_priedes_3uzd <- rast("5uzd_faili/lapa3331_3uzd_priedes100m.tif")
+lapa3331_priedes_2uzd <- project(lapa3331_priedes_3uzd, st_crs(lapa3331)$wkt)
+
+# otrais rastrs
+lapa3332_priedes_3uzd <- rast("5uzd_faili/lapa3332_3uzd_priedes100m.tif")
+lapa3332_priedes_3uzd <- project(lapa3332_priedes_3uzd, st_crs(lapa3331)$wkt)
+
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(lapa3331_priedes_3uzd, group = "rastrs3331") %>%
+  addRasterImage(lapa3332_priedes_3uzd, group = "rastrs3332") %>%
+  addPolygons(data = lapa3331, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3332, color = "blue", group = "lapas") %>%
+  addLayersControl(
+    overlayGroups = c("rastrs3331","rastrs3332","lapas"),
+    options = layersControlOptions(collapsed = FALSE))
+```
+Man bija aizdomas, ka kādā no malām poligoni neaizsniegsies līdz pašām lapas malām, attiecīgi radot pārrāvumus starp atsevišķiem rastriem tomēr izskatās, ka tas tā nav noticis
+
+3.3. solis: apvienojiet iteratīvajā ciklā radītos GeoTIFF failus vienā slānī, kura nosaukums ir saistāms ar apakšuzdevumu (laika mērogošanas beigas). Vai apvienotajā slānī ir redzamas karšu lapu robežas? Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+
+Apvienoju failus vienā slānī ar merge
+
+```{r}
+uzd3_priedes_file_paths <- list.files("5uzd_faili", pattern = "^lapa\\d{4}_3uzd_priedes100m\\.tif$", full.names = TRUE)
+uzd3_priedes <- lapply(uzd3_priedes_file_paths, rast)
+
+uzd3_priedes_merged <- do.call(merge, uzd3_priedes)
+writeRaster(uzd3_priedes_merged, "Uzd3_priedes100m_merged.tif", overwrite = TRUE)
+```
+
+Skatos, kas sanācis
+
+```{r}
+leaflet() %>%
+  addTiles() %>%
+  addRasterImage(uzd3_priedes_merged) %>%
+  addPolygons(data = lapa3331, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3332, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3333, color = "blue", group = "lapas") %>%
+  addPolygons(data = lapa3334, color = "blue", group = "lapas") %>%
+  addLayersControl(
+    overlayGroups = "lapas",
+    options = layersControlOptions(collapsed = FALSE))
+```
+Pārrāvumu nav, tomēr redzams, ka tieši zem lapu robežām vērtības ir zemākas - tas tāpēc, ka nav iekļauti uz robežām vai tuvu tām ārpusē esošie poligoni, kas tad attiecīgi nav pierēķināti priežu mežu īpatsvaram un rada kļūdas datos.
+
+Laika mērīšanai:
+
+```{r, message = FALSE, warning = FALSE}
+SakumsUzd3 <- Sys.time()
+
+# 1.1. solis
+for (i in lapas_list_paths) {
+  lapa <- st_read_parquet(i)
+  mezi <-st_read_parquet("../centra_mezi/centra_mezi_labots.parquet")
+  mezi <- st_transform(mezi, st_crs(lapa)) 
+  fails <- st_filter(mezi, lapa, .predicate = st_within)
+  basename <- tools::file_path_sans_ext(basename(i))
+  nosaukums <- file.path("5uzd_faili", paste0(basename,"mezi_3uzd.parquet"))
+  st_write_parquet(fails, nosaukums)
+}
+
+# 1.2. solis
+for (i in seq_along(uzd3_mezi_file_paths)) {
+  mana_funkcija(mezs_dati = uzd3_mezi_file_paths[i], koku_suga = 1, uzd_nr = "3uzd")
+}
+
+# 1.3. solis
+uzd3_priedes_merged <- do.call(mosaic, uzd3_priedes)
+writeRaster(uzd3_priedes_merged, "Uzd2_priedes100m_merged.tif", overwrite = TRUE)
+
+BeigasUzd3 <- Sys.time()
+print(BeigasUzd3 - SakumsUzd3)
+```
+
+Viss kopā aizņēma 2,5 minūtes.
+
+```{r}
+rm(fails,lapa,lapa3331_priedes_3uzd, lapa3332_priedes_3uzd, lapa3331uzd3, uzd3_mezi, uzd3_priedes, BeigasUzd3, SakumsUzd3, uzd3_mezi_file_paths, uzd3_priedes_file_paths)
+```
+
+
+# 4) Funkcija bez iteratīvā procesa
+
+4.1. solis: ar sevis izvēlētu pieeju atlasiet mežaudzes, kuras pieder kādai no izvēlētajām karšu lapām (sākums laika mērogošanai).
+
+4.2. solis: ieviesiet funkciju atlasītajām mežaudzēm bez iteratīvā procesa, bet nodrošinot rezultējošā rastra aptveri tikai izvēlētajām kartes lapām (beigas laika mērogošanai). Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+
+Tā kā beigu rezultāts tāpat ir kopīgs rastrs, apvienošu visas četras lapas vienā slānī. Tās aizvien glabājas objektā lapas_list, tikai jāsavieno atkal kopā.
+
+```{r}
+lapas <- bind_rows(lapas_list)
+```
+
+Izmantošu pieeju ar st_join, jo pagaidām tā šķita precīzākā. Te uzreiz varu mērīt laiku, jo pa vidu neko neapskatīšu - funkciju darbība ir skaidra. Vēr'tibas salīdzināšu pašās beigās visiem sešiem apakšuzdevumiem kopā.
+
+```{r, warning = FALSE, message = FALSE}
+SakumsUzd4 <- Sys.time()
+
+uzd4_mezi <- st_join(mezi, lapas, left = FALSE)
+st_write_parquet(uzd4_mezi, "5uzd_faili/mezi_4uzd.parquet")
+
+# modificētā funkcija šim uzdevumam
+mana_funkcija_4uzd <- function(mezs_dati, koku_suga) {
+mezs_dati <- st_read_parquet(mezs_dati)
+ref10m <- rast(("../ref_rastri/LV10m_10km.tif"))
+ref10m <- crop(ref10m, mezs_dati)
+ref100m <- rast(("../ref_rastri/LV100m_10km.tif"))
+ref100m <- crop(ref100m, mezs_dati)
+priezu_mezi <- mezs_dati %>% filter(s10 == koku_suga)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
+priezu_mezi_100m <-
+  terra::resample(priezu_mezi_10m,ref100m,method="average",
+                  filename = "4uzd_priedes100m.tif", overwrite=TRUE)
+}
+
+# pielietoju funkciju
+uzd4_priedes <- mana_funkcija_4uzd(mezs_dati = "5uzd_faili/mezi_4uzd.parquet", koku_suga = 1)
+
+BeigasUzd4 <- Sys.time()
+print(BeigasUzd4 - SakumsUzd4)
+```
+
+Process aizņēma aptuveni pus minūti
+
+```{r}
+rm(uzd4_mezi, BeigasUzd4, SakumsUzd4, mana_funkcija_4uzd)
+```
+
+
+
+# 5) Funkcija visai MVR informācijai
+
+5.1. solis: ieviesiet funkciju visai MVR informācijai (sākums laika mērogošanai)
+
+Pieļauju, ka ar "visu MVR informāciju" domāta tikai centra virsmežniecība?
+
+Ieviešu un pielietoju funkciju (šoreiz jānomaina bija tikai izvades rastra filename:
+
+```{r, message = FALSE}
+SakumsUzd5 <- Sys.time()
+
+mana_funkcija_5uzd <- function(mezs_dati, koku_suga) {
+mezs_dati <- st_read_parquet(mezs_dati)
+ref10m <- rast(("../ref_rastri/LV10m_10km.tif"))
+ref10m <- crop(ref10m, mezs_dati)
+ref100m <- rast(("../ref_rastri/LV100m_10km.tif"))
+ref100m <- crop(ref100m, mezs_dati)
+priezu_mezi <- mezs_dati %>% filter(s10 == koku_suga)
+priezu_mezi_10m <- rasterize(priezu_mezi,ref10m, background = 0)
+priezu_mezi_10m[is.na(ref10m)] <- NA
+priezu_mezi_100m <-
+  terra::resample(priezu_mezi_10m,ref100m,method="average",
+                  filename = "5uzd_priedes100m.tif", overwrite=TRUE)
+}
+
+mana_funkcija_5uzd(mezs_dati = "../centra_mezi/centra_mezi_labots.parquet", koku_suga = 1)
+uzd5_priedes <- crop(rast("5uzd_priedes100m.tif"), mezi)
+
+BeigasUzd5 <- Sys.time()
+print(BeigasUzd5 - SakumsUzd5)
+```
+
+Process aizņēma aptuveni pusotru minūti
+
+```{r}
+rm(basename, BeigasUzd5 ,i ,nosaukums, SakumsUzd5)
+```
+
+xxxxx vēl jāsalīdzina rezultāti!!
+
+
+# 6) Jaudīgiem datoriem un dažādu pieeju izmēģināšanai
+
+Saistiet atbilstošo mežaudžu informāciju ar 100 m tīklu no projekta repozitorija un izveidojiet projekta repozitorijā esošajam 100 m rastra tīklam atbilstošu rastru pēc šūnu novietojuma un vērtībām. Kad iegūstat salīdzināmu rezultātu, mērogojiet tā izpildei nepieciešamo laiku. Kā vērtības sakrīt ar citiem apakšuzdevumiem?
+
+Mans dators nav jaudīgs, tomēr tāpat vismaz pamēģināšu?
+
+
+
+
 
 
