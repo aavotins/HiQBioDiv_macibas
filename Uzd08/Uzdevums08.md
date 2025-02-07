@@ -3,7 +3,7 @@ Astotais uzdevums: GEE
 
 ## Termiņš
 
-Līdz ~~(2025-01-15)~~ **2025-01-27**, izmantojot
+Līdz ~~(2025-01-10)~~ ~~(2025-01-27)~~ **2025-02-07**, izmantojot
 [fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)
 un [pull
 request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
