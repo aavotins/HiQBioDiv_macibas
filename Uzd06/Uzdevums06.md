@@ -4,7 +4,7 @@ aprakstīšanai
 
 ## Termiņš
 
-Līdz ~~(2025-01-15)~~ **2025-01-27**, izmantojot
+Līdz ~~(2025-01-10)~~ ~~(2025-01-27)~~ **2025-02-07**, izmantojot
 [fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)
 un [pull
 request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
@@ -136,7 +136,13 @@ ievietoto [references slānim](https://zenodo.org/records/14497070)
 
 3.  Papildieniet otrā punkta rastrus, izveidojot jaunus slāņus, ar
     informāciju par mežaudzes vecuma grupu kā klases vērtības otro
-    ciparu.
+    ciparu. Dalījumam mežaudžu vecuma grupās, izmantojiet
+    [vecumgrupas](https://www.letonika.lv/groups/default.aspx?cid=36192&r=7&lid=36192&q=&h=1144)
+    un
+    [vecumklases](https://www.letonika.lv/groups/default.aspx?cid=36193&r=7&lid=36193&q=&h=1166)
+    un, aprēķinot [galvenās cirtes
+    vecumu](https://likumi.lv/ta/id/2825#p9), pieņemiet “I un augstāka”
+    bonitāti.
 
 4.  Savienojiet pirmajā un trešajā punktos izveidotos slāņus, tā, lai
     mazāka skaitliskā vērtība nozīmē augstāku prioritāti/svaru/dominanci
