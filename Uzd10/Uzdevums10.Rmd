@@ -10,24 +10,36 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Termiņš
 
-Līdz ~~(2025-01-20)~~ ~~(2025-02-17)~~ **2025-02-24**, izmantojot 
-[fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo) 
-un [pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork) uz zaru "Dalibnieki", 
-šī uzdevuma direktorijā pievienojot .Rmd vai .qmd failu, kura nosaukums ir 
-Uzd10_[JusuUzvards], piemēram, `Uzd10_Avotins.Rmd`, kas sagatavots izvadei github 
-dokumentā (piemēram, YAML galvenē norādot `output: rmarkdown::github_document`), 
-un tā radīto izvades failu.
+Līdz ~~(2025-01-20)~~ ~~(2025-02-17)~~  ~~(2025-02-24)~~ **2025-03-03** projekta *sharepoint* 
+direktorijā "WP2_macibas" savā apakšdirektorijā iesniedziet 
+devitajā uzdevumā izvēlēto sugu novērojumus, kas atbilstoši projekta vajadzībām sagatavoti modelēšanai.
 
 ## Premise
 
-Skatīt pamata zarā
+Šī repozitorija pamata aprakstā ieteiktajā literatūrā, kas papildināta ar 
+aktuālajām publikācijām, iepazīstieties ar galvenajiem konceptiem un pieejām sugu 
+izplatības un plašākā kontekstā - ekoloģiskajā modelēšanā. Mēģiniet noskaidrot, kādas 
+ir biežāk lietotās datu analīzes metodes un pieejas sugu izplatības modelēšanā, kādi 
+dati tām ir nepieciešami. Saprotiet, ka ļoti svarīgas ir pietiekoši precīzi datētas un 
+ģeoreferencētas drošas klātbūtnes vietas, kuras spēj raksturot (vai vismaz tiecās 
+uz šo spēju) interesējošās sugas interesējošās dzīves stadijas ekoloģisko nišu. 
 
 
 
 ## Uzdevums
 
-Skatīt pamata zarā
+Pildot uzdevumu, domājiet arī par devīto un vienpadsmito uzdevumiem.
+
+1. Iepazīstieties ar projekta sanāksmju materiāliem (direktorija "Sanaksmes"), ja 
+tajās nepiedalījāties, un direktorijā "WP1" esošajiem uzdevumu (Task1.1, Task1.2 
+un Task1.3) aprakstiem un sniegtajiem piemēriem.
+
+2. Sevis devītajā uzdevumā izvēlētajām sugām veiciet pilnu darba gaitu novērojumu 
+apkopošanai un izvēlei modelēšanai, nodrošinot izsekojamību, atkārtojamību, reproducējamību 
+un replicējamību.
 
 ## Padomi
 
-Skatīt pamata zarā
+Jau kopš devītā uzdevuma uzsvērti mācamies arī strādāt kā komanda. Sazināmies, pārrunājam 
+problēmas, nepieciešamības un iespējamos risinājumus, izmantojot diskusiju 
+forumu vai tiekoties.

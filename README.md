@@ -252,39 +252,39 @@ Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: ~~(2025-01-15)~~ ~~(2
 
 Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: ~~(2025-01-15)~~ ~~(2025-01-27)~~ **2025-02-07**
 
-9. uzdevums: [sugas izvēle un tās apraksts](./Uzd09/Uzdevums09.md)  
-(modelēšanai un aizsardzības telpiskajai plānošanai) 
+9. uzdevums: [sugu izvēle un to aprakstu](./Uzd09/Uzdevums09.md)  
+(modelēšanai un aizsardzības telpiskajai plānošanai) sagatavošana 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-01-20)~~ ~~(2025-02-17)~~ **2025-02-24**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: ~~(2025-01-20)~~ ~~(2025-02-17)~~  ~~(2025-02-24)~~ **2025-03-03**
 
 10. uzdevums: [novērojumu atlase modelēšanai](./Uzd10/Uzdevums10.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-01-20)~~ ~~(2025-02-17)~~ **2025-02-24**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: ~~(2025-01-20)~~ ~~(2025-02-17)~~  ~~(2025-02-24)~~ **2025-03-03**
 
 11. uzdevums: [sugai specifiski ekoģeogrāfiskie mainīgie](./Uzd11/Uzdevums11.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-01-20)~~ ~~(2025-02-17)~~ **2025-02-24**
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: ~~(2025-01-20)~~ ~~(2025-02-17)~~  ~~(2025-02-24)~~ **2025-03-23**
 
-12. uzdevums: [sugas izplatības modelēšana](./Uzd12/Uzdevums12.md) 
+12. uzdevums: [sugu izplatības modelēšana](./Uzd12/Uzdevums12.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-05)~~ ~~(2025-02-24)~~ **2025-03-03**
+Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-05)~~ ~~(2025-02-24)~~ ~~(2025-03-03)~~
 
 13. uzdevums: [asociācijas un preferences dzīvotņu piemērotībā](./Uzd13/Uzdevums13.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-12)~~ ~~(2025-03-03)~~ **2025-03-10**
+Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-12)~~ ~~(2025-03-03)~~ ~~(2025-03-10)~~
 
 14. uzdevums: [vietu prioritizēšana aizsardzībai](./Uzd14/Uzdevums14.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-19)~~ ~~(2025-03-10)~~ **2025-03-24**
+Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-19)~~ ~~(2025-03-10)~~ ~~(2025-03-24)~~
 
 ~~15. uzdevums: [vietu aizņemtība](./Uzd15/Uzdevums15.md)~~ 
 
-~~Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-26)~~ **2025-03-24**~~
+~~Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: (2025-02-26) (2025-03-24)~~
 
 ~~16. uzdevums: [populācijas lielums](./Uzd16/Uzdevums16.md)~~ 
 
-~~Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-03-05)~~ **2025-03-24**~~
+~~Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: (2025-03-05) (2025-03-24)~~
 
 ~~17. uzdevums: [daudzsugu izplatība](./Uzd17/Uzdevums17.md)~~ 
 
-~~Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: **2025-03-12**~~
+~~Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: (2025-03-12)~~
