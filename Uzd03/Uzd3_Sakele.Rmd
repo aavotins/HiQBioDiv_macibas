@@ -1,0 +1,232 @@
+---
+title: "Uzd3_Sakele"
+author: "Vita"
+date: "2025-01-27"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#1.
+```{r cache=TRUE, warning=FALSE, message=FALSE}
+#Vajadzīgās pakotnes
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(sf, httr, tidyverse, ows4R, terra, RCurl, archive, sfarrow, raster)
+
+```
+
+
+##Mežniecības dati
+```{r warning=FALSE, cache=TRUE, warning=FALSE}
+
+if (!dir.exists("data/download")) {
+  dir.create("data/download", recursive=TRUE)
+  }
+
+url= "https://data.gov.lv/dati/lv/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92/resource/392dfb67-eeeb-43c2-b082-35f9cf986128/download/centra.7z"
+
+destfile = "data/download/centra.7z"
+
+download.file(url=url, destfile = destfile, mode='wb')
+
+
+
+if (!dir.exists("data/VMD")) {
+  dir.create("data/VMD")
+}
+archive_extract(destfile, dir = "data/VMD")
+
+
+
+if (!dir.exists("data/VMD/merged")) {
+  dir.create("data/VMD/merged")
+}
+ 
+file_list <- list.files("data/VMD", pattern = "*shp$", full.names = TRUE)
+shapefile_list <- lapply(file_list, read_sf) #ielasa visus failus
+centra_shp <- do.call(rbind, shapefile_list) # apvieno vienā failā
+st_write_parquet(centra_shp, "data/VMD/merged/centra.parquet") # ieraksta apvienoto failu, kā parquet uz diska
+
+rm(centra_shp, shapefile_list) #iztīrīt atmiņu
+
+centra_parq<- st_read_parquet("data/VMD/merged/centra.parquet")
+
+
+# Pārbaudīt, vai visas ģeometrijas ir MULTIPOLYGON
+if(all(st_geometry_type(centra_parq) == "MULTIPOLYGON")) {
+  print("Visas ģeometrijas ir MULTIPOLYGON")
+} else {
+  print("Dažas ģeometrijas nav MULTIPOLYGON")
+  }
+
+# Pārbaudīt, vai nav tukšu ģeometriju
+if(any(st_is_empty(centra_parq))) {
+  print("Slānī ir tukšas ģeometrijas")
+  # Izdzēst tukšās ģeometrijas
+  centra_parq <- centra_parq[!st_is_empty(centra_parq), ] 
+}
+
+# Pārbaudīt, vai nav kļūdainu ģeometriju
+if(any(!st_is_valid(centra_parq))) {
+  print("Slānī ir kļūdainas ģeometrijas")
+  # Salabot un izdzēst kļūdainās ģeometrijas
+  centra_parq <- st_make_valid(centra_parq)
+  centra_parq <- centra_parq[st_is_valid(centra_parq), ] 
+}
+
+
+```
+
+```{r cache=TRUE}
+bbox_centra <- st_bbox(centra_parq)
+bbox_query <- paste(bbox_centra["xmin"],bbox_centra["ymin"], 
+                    bbox_centra["xmax"], bbox_centra["ymax"], "EPSG:3059", sep = ",")
+
+rm(centra_parq)
+```
+
+##LAD dati
+```{r cache=TRUE, warning=FALSE}
+wfs_lad<-"https://karte.lad.gov.lv/arcgis/services/lauki/MapServer/WFSServer"
+
+url <- parse_url(wfs_lad)
+
+url$query <- list(
+  service = "WFS",
+  #version = "2.0.0",
+  request = "GetFeature",
+  typename = "LAD:Lauki",
+  #srsName = "EPSG:4326",
+  srsName = "EPSG:3059", 
+	bbox = bbox_query  
+  )
+request <- build_url(url)
+LAD_data <- read_sf(request)
+
+
+if (!dir.exists("data/LAD")) {
+  dir.create("data/LAD")
+}
+
+st_write_parquet(LAD_data, "data/LAD/LAD.parquet")
+LAD_parq <- st_read_parquet("data/LAD/LAD.parquet", quiet = TRUE)
+
+rm(LAD_data)
+
+```
+
+##References dati
+```{r cache=TRUE, warning=FALSE}
+if (!dir.exists("data/reference_raster")) {
+  dir.create("data/reference_raster")
+}
+
+url= "https://zenodo.org/records/14497070/files/LV100m_10km.tif?download=1"
+destfile = "data/reference_raster/LV10m_10km.tif"
+
+download.file(url=url, destfile = destfile, mode='wb')
+
+raster_10m_10km = raster(destfile)
+
+rm(url, destfile)
+
+```
+
+#2.
+```{r}
+#samazināt references rastru
+raster_10m_10km_adjusted<-crop(raster_10m_10km, LAD_parq)
+
+
+if(!require("fasterize")) install.packages("fasterize")
+
+#viss, kas nav LAD, būs 0
+LAD_raster_10m <- fasterize(LAD_parq, raster_10m_10km_adjusted, background = 0)
+
+#Ārpus LV būs NA
+LAD_raster_10m_masked <- mask(LAD_raster_10m, raster_10m_10km_adjusted)
+
+plot(LAD_raster_10m_masked)
+
+writeRaster(LAD_raster_10m_masked, "data/LAD_raster_10m.tif", format = "GTiff", overwrite = TRUE)
+
+```
+
+#3.
+##Reference 100m
+```{r cache=TRUE, warning=FALSE}
+if (!dir.exists("data/reference_raster")) {
+  dir.create("data/reference_raster")
+}
+
+url= "https://zenodo.org/records/14497070/files/LV100m_10km.tif?download=1"
+destfile = "data/reference_raster/LV100m_10km.tif"
+
+download.file(url=url, destfile = destfile, mode='wb')
+
+raster_100m_10km = raster(destfile)
+
+rm(url, destfile)
+
+```
+## pārveidošanas ātrums
+```{r}
+raster_100m_10km_adjusted<-crop(raster_100m_10km, LAD_parq)
+
+if (!require("microbenchmark")) install.packages("microbenchmark")
+
+#lauku īpatsvars 100x100m laukumos
+
+speed<-microbenchmark(
+  LAD_raster_100m_agr <- aggregate(LAD_raster_10m_masked, fact = 10, fun = 'mean'),
+  LAD_raster_100m_resampled<-resample(LAD_raster_10m_masked, raster_100m_10km_adjusted,
+                                    method="bilinear"), #nesapratu, kāpēc "average" neņēma
+  times =5,
+  unit="s"
+)
+
+print(speed) #aggregate() ir ātrāks
+
+
+plot(LAD_raster_100m_agr)
+plot(LAD_raster_100m_resampled)
+
+rm(LAD_raster_100m_resampled)
+```
+#4.
+```{r cache=TRUE}
+#lai būtu procenti
+LAD_raster_100m_agr_prc<-as.integer(LAD_raster_100m_agr*100)
+
+#Veselos skaitļu glabāšana
+
+LAD_INT1S <- writeRaster(LAD_raster_100m_agr_prc,"data/LAD_INT1S.tif", datatype = "INT1S", overwrite = TRUE)
+print(file.size("data/LAD_INT1S.tif"))
+
+LAD_INT1U <- writeRaster(LAD_raster_100m_agr_prc,"data/LAD_INT1U.tif", datatype = "INT1U", overwrite = TRUE)
+print(file.size("data/LAD_INT1U.tif"))
+
+
+#Dažādi rastri
+
+LAD_raster_100m_agr_bin <- aggregate(LAD_raster_10m_masked, fact = 10, fun = 'max')
+
+
+writeRaster(LAD_raster_10m_masked, "data/LAD_raster_10m_masked.tif", format = "GTiff")
+print(file.size('data/LAD_raster_10m_masked.tif'))
+
+writeRaster(LAD_raster_100m_agr_bin, "data/LAD_raster_100m_agr_bin.tif", format = "GTiff")
+print(file.size('data/LAD_raster_100m_agr_bin.tif'))
+
+```
+Izvēlētie datu tipi minimāli ietekmē faila izmēru. Rastra izšķirtspēja starp 10 un 100m faila izmērā veido atšķirību gandrīz 50 reizes.
+```{r}
+unlink("data", recursive = TRUE)
+
+rm(list = ls(all.names = TRUE)) #will clear all objects includes hidden objects.
+gc()
+
+```
+
