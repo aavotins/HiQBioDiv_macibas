@@ -1,0 +1,146 @@
+---
+title: "Uzd04"
+author: "Raitis Riters"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Pakotnes, kas man bija nepieciešamas uzdevuma izpildei.
+
+```{r, warning=FALSE, message=FALSE}
+library(sf)
+library(arrow)
+library(terra)
+library(fasterize)
+library(tidyverse)
+library(dplyr)
+library(doParallel)
+```
+
+## Pirmais uzdevums
+
+Funkcijas izveide
+
+```{r}
+mana_funkcija<-function(ievades_fails, rastrs10m_vieta, rastrs100m_vieta, galamerkis){
+  #Ielasu datus
+  mezi <- read_parquet(ievades_fails)
+  rastrs_10m <- rast(rastrs10m_vieta)
+  rastrs_100m <- rast(rastrs100m_vieta)
+  #Izfiltrēju un salaboju datus
+  priedes <- mezi %>% filter(s10=="1")
+  priedes <- st_as_sf(priedes)
+  priedes <- st_set_crs(priedes, 3059)
+  #Apgriežu rāmi
+  rastrins <- crop(rastrs_10m, priedes)
+  rastrins <- fasterize::raster(rastrins)
+  #Sagatavoju datus
+  priedes$s10 <- 1
+  priedes <- priedes %>% select(s10)
+  #Izveidoju 10m rastru
+  priedes10m <- fasterize(priedes, rastrins, field = "s10", background = 0)
+  priedes10m <- mask(priedes10m, rastrins)
+  priedes10m <- terra::rast(priedes10m)
+  #Izveidoju 100m rastru ar priežu īpatsvaru
+  rastrs100m <- crop(rastrs_100m, priedes10m)
+  priedes100m <- resample(priedes10m, rastrs100m, method = "average")
+  #Ierakstu rastru diskā
+  writeRaster(priedes100m, galamerkis, overwrite = TRUE)
+  return(priedes100m)
+}
+
+
+```
+
+Funkcijas argumenti un palaišana
+
+```{r, message=FALSE, warning=FALSE}
+ievades_fails<-"../Uzd03/centrs_geoparquet.parquet"
+rastrs10m_vieta<-"../Uzd03/rastrs/LV10m_10km.tif"
+rastrs100m_vieta<-"../Uzd03/rastrs/LV100m_10km.tif"
+galamerkis<-"./priedes100m.tif"
+mana_funkcija(ievades_fails, rastrs10m_vieta, rastrs100m_vieta, galamerkis)
+```
+
+## Otrais uzdevums
+
+```{r}
+laiks1<- system.time(mana_funkcija(ievades_fails, rastrs10m_vieta, rastrs100m_vieta, galamerkis))
+print(laiks1)
+```
+
+Funkcijas izpilde aizņēma 40-50 sekundes, pārsvarā aizņēma 2 kodolus, bet mēdza arī sasniegt 3 kodolus. RAM bija pietiekams funkcijas izpildei. Tas aizņēma aptuveni 1-1.2GB atmiņas.
+
+## Trešais uzdevums
+
+Vispirms iegūstu informāciju par to, cik un kādi apgabali atrodas šajā kombinētajā failā.
+
+```{r}
+mezi<-read_parquet(ievades_fails)
+kodi<-unique(mezi$forestry_c)
+kodi<-c(kodi)
+print(kodi)
+```
+
+```{r}
+cikliska_funkcija <- function(mezi, kodi) {
+  for (kods in kodi) {
+    parketa_vieta <- paste0("./nodala", kods, ".parquet")
+    apgabala_dati <- mezi %>% filter(forestry_c == as.character(kods))
+    write_parquet(apgabala_dati, parketa_vieta)
+  }
+}
+
+laiks2<-system.time(cikliska_funkcija(mezi, kodi))
+print(laiks2)
+```
+
+Cikliskā funkcija aizņēma 2-3 sekundes un 3 CPU kodolus un 1 GB RAM.
+
+## Ceturtais uzdevums
+
+Nosākuma nosaku, cik man ir kodoli.
+
+```{r}
+cores <- detectCores()
+print(cores)
+```
+
+Saka, ka 8, taču es labi zinu, ka manai ierīcei ir 4 kodoli. Šis laikam atbilst procesēšanas vienībām. Tātad- katras 2 procesēšanas vienības= 1 kodols.
+
+```{r}
+  cl <- makeCluster(detectCores()-6)
+  registerDoParallel(cl)
+
+laiks3<-system.time(foreach(kods = kodi, .packages = c("dplyr", "arrow")) %dopar% {
+    file_path <- paste0("./nodala", kods, ".parquet")
+    subset_data <- mezi %>% filter(forestry_c == as.character(kods))
+    write_parquet(subset_data, file_path)
+  })
+
+  stopCluster(cl)
+print(laiks3)
+```
+
+Aizņemtais laiks ir krietni lielāks nekā ar noklusējuma uzstādījumiem. Tika aizņemti brīžiem pat 75% CPU un 1.5GB RAM. Pietika atmiņas.
+
+## Piektais uzdevums
+
+```{r}
+cl2 <- makeCluster(detectCores()-2)
+  registerDoParallel(cl2)
+
+laiks4<-system.time(foreach(kods = kodi, .packages = c("dplyr", "arrow")) %dopar% {
+    file_path <- paste0("./nodala", kods, ".parquet")
+    subset_data <- mezi %>% filter(forestry_c == as.character(kods))
+    write_parquet(subset_data, file_path)
+  })
+
+  stopCluster(cl2)
+print(laiks4)
+```
+
+Tika izmantoti 2GB RAM un aizņemti 100% CPU, kā arī tika aizņemts daudz ilgāks laiks, kas galīgi nešķiet loģiski. Nejaušības pēc nebiju saglabājis šo uzdevumu un to nācās vēlreiz izdarīt. Pirmo reizi pildot uzdevumu, funkcija ar 1 kodolu aizņēma daudz daudz vairāk laika nekā funckija ar noklusējuma iestatījumiem vai 3 kodolu lietojumu. Man nav īsti skaidrojuma šajai parādībai.
