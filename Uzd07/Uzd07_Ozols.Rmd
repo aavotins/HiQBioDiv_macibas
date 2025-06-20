@@ -1,0 +1,211 @@
+---
+title: "Uzd07_Ozols"
+author: "Janis Ozols"
+output: rmarkdown::github_document
+---
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+Sagatavojam darba vidi ielasot pakotnes
+```{r,packages, warning=FALSE,message=FALSE}
+if (!require("sf")) install.packages("sf");library(sf)
+if (!require("arrow")) install.packages("arrow");library(arrow)
+if (!require("sfarrow")) install.packages("sfarrow");library(sfarrow)
+if (!require("tidyverse")) install.packages("tidyverse");library(tidyverse)
+if (!require("terra")) install.packages("terra");library(terra)
+if (!require("tools")) install.packages("tools");library(tools)
+if (!require("raster")) install.packages("raster");library(raster)
+if (!require("fasterize")) install.packages("fasterize");library(fasterize)
+if (!require("exactextractr")) install.packages("exactextractr");library(exactextractr)
+if (!require("microbenchmark")) install.packages("microbenchmark");library(microbenchmark)
+if (!require("dplyr")) install.packages("dplyr");library(dplyr)
+```
+1. Izmantojiet {exactextractr}, lai 500 m buferzonās ap projekta Zenodo repozitorijā pieejamo 100 m šūnu centriem (pts100_sauszeme.parquet), kuri atrodas piektajā uzdevumā izvēlētajās kartes lapās, aprēķinātu sestā uzdevuma ceturtajā apakšpunktā izveidotā rastra katras klases platības īpatsvaru. No aprēķinu rezultātiem sagatavojiet rastra slāņus, kas atbilst projekta Zenodo repozitorijā dotajam 100 m rastram (LV100m_10km.tif).
+```{r,uzd1}
+#Gars uzdevums, sadalam daļās, vispirms sagatavosim visus nepieciešamos failus: pts100_sauszeme.parquet, piektā uzdevuma izvēlētās karšu lapas, 6. uzdevuma 4. apakšpunktā izveidoto rastru un 100m references rastru
+sunucentri_100m <- st_read_parquet("../Uzd03/pts100_sauzeme.parquet")
+lapa3344 <- st_read_parquet("../Uzd05/lapa3344.parquet")
+lapa3343 <- st_read_parquet("../Uzd05/lapa3343.parquet")
+lapa3333 <- st_read_parquet("../Uzd05/lapa3333.parquet")
+lapa3334 <- st_read_parquet("../Uzd05/lapa3334.parquet")
+ref100 <- rast("../Uzd03/LV100m_10km.tif")
+mezi_lauki_rastr <- rast("../Uzd06/uzdevums6apakspunkts4.tif")
+int_teritorija <- bind_rows(lapa3334,lapa3333,lapa3343,lapa3344)
+plot(int_teritorija["NUMURS"])
+```
+```{r,sunu_centri_bufer}
+#Ieklaujam tikai punktus, kas iekrit interesejosajas lapas un izveidojam 500m buferus ap katru punktu
+int_teritorija <- st_transform(int_teritorija, crs = 3059)
+sunucentri_100m <- st_transform(sunucentri_100m, crs =3059)
+int_sunu_centri <- st_join(sunucentri_100m,int_teritorija,left = FALSE)
+int_sunu_centri
+int_sunu_centri_buffer <- st_buffer(int_sunu_centri,500)
+int_sunu_centri_buffer
+```
+```{r,exactextract}
+#Izmantojam {exactextractr}, lai aprēķinātu katras klases platības īpatsvaru 500m buferzonās.
+klases_500m_buferos <- exact_extract(mezi_lauki_rastr,int_sunu_centri_buffer, fun = "frac",append_cols = "id")
+```
+```{r,dataframe}
+klases_500m_buferos <- t(klases_500m_buferos)
+```
+```{r,frac}
+#iegūts platības īpatsvars katrai no klasēm katrā 500m buferī, kas ir kā daturāmis, esošos datus pievienojam buferu poligonu slānim, katru klasi atsevišķi un rasterizējam kā rastru un pārliecināmies, ka iegūtais rastrs sakrīt ar references rastru izmantojot resample
+klases_500m_buferos <- as.data.frame(klases_500m_buferos)
+polygon_id_col <- "id"  
+df_id_col <- "id"
+buffers_joined <- left_join(int_sunu_centri_buffer, klases_500m_buferos, by = setNames(df_id_col, polygon_id_col))
+class_cols <- grep("^frac_", names(buffers_joined), value = TRUE)
+buffers_vect <- vect(buffers_joined)
+for (col_name in class_cols) {
+  cat("Rasterizing:", col_name, "\n")
+  r_out <- rasterize(buffers_joined,ref100, field = col_name, fun = mean, background = NA)
+    writeRaster(r_out, paste0(col_name, "_terra.tif"), overwrite = TRUE)
+}
+r_stack <- rast(paste0(class_cols, "_terra.tif"))
+plot(r_stack)
+```
+2. Brīvi izvēlaties desmit blakus esošus 1km kvadrātus, kas atrodas trešajā uzdevumā ar Lauku atbalsta dienesta datiem aptvertajā teritorijā. Izmantojiet projekta Zenodo repozitorijā dotos 300 m un 100 m tīklu centrus, kas atrodas izvēlētajos kvadrātos. Aprēķiniet 3 km buferzonas ap ik centru. Veiciet zonālās statistikas aprēķinus lauka bloku īpatsvaram buferzonā (no tās kopējās platības), mērogojot aprēķiniem nepieciešamo laiku (desmit atkārtojumos):
+```{r,uzdevums2}
+#Ielasam visus nepieciešamos failus. Sūnucentri100 un references rastrs ielasīts jau iepriekš. Nomainam visiem koordinātas uz lks92.
+lapas <- st_read_parquet("../Uzd03/tks93_50km.parquet")
+lauki_10m <- rast("../Uzd03/Centrs_10m.tif")
+lauki_100m <- rast("../Uzd03/Centrs_100m.tif")
+teritorija <- st_read_parquet("../Uzd03/teritorija_poligons.parquet")
+sunucentri_300m <- st_read_parquet("../Uzd03/pts300_sauzeme.parquet")
+sunucentri_100m <- st_read_parquet("../Uzd03/pts100_sauzeme.parquet")
+lapas <- st_transform(lapas, crs = 3059)
+crs(lauki_10m) <- st_crs(lapas)$wkt
+crs(lauki_100m) <- st_crs(lapas)$wkt
+teritorija <-st_transform(teritorija, crs = 3059)
+sunucentri_100m <- st_transform(sunucentri_100m, crs = 3059)
+sunucentri_300m <- st_transform(sunucentri_300m, crs = 3059)
+ref_100vec <- st_read_parquet("../Uzd03/tikls100_sauzeme.parquet")
+ref_100vec <- st_transform(ref_100vec, crs = 3059)
+```
+```{r, lapu_atlase}
+#Izvēlamies desmit blakus esošus 1km kvadrātus, kas atrodas trešajā uzdevumā ar Lauku atbalsta dienesta datiem aptvertajā teritorijā. Atkārtosim soļus, kurus veicām piektajā uzdevumā. References vektoram atlasīsim tikai vajadzīgo teritoriju.
+lapas_lauki_dati <- st_join(teritorija,lapas)
+unique(lapas_lauki_dati$NUMURS)
+izveletas_lapas <- c("3233", "3234", "3243", "3244", "3333", "3334", "3343", "3344", "3231", "3232")
+lapas_izv <- lapas %>% filter(lapas$NUMURS %in% izveletas_lapas)
+plot(lapas_izv["NUMURS"])
+lapas_union <- lapas_izv %>%
+  st_union() %>%
+  st_cast("MULTIPOLYGON") %>%
+  st_make_valid()
+lapas_union <- st_transform(lapas_union, crs = crs(lauki_10m))
+lapas_vect <- terra::vect(lapas_union)
+lauki_10m_crop <- terra::crop(lauki_10m, lapas_vect)
+lauki_10m_crop <- terra::mask(lauki_10m_crop, lapas_vect)
+lauki_100m_crop <- terra::crop(lauki_100m, lapas_vect)
+lauki_100m_crop <- terra::mask(lauki_100m_crop, lapas_vect)
+ref_100vec <- ref_100vec %>% filter(tks50km %in% lapas_izv$NUMURS)
+plot(lauki_10m)
+plot(lauki_100m)
+```
+```{r,km3_buferi}
+#aprēķinam 3km buferus ap 100m un 300m šūnucentriem
+sunucentri_100_lapas <- st_intersection(sunucentri_100m, lapas_union)
+sunucentri_300_lapas <- st_intersection(sunucentri_300m, lapas_union)
+sunucentri_100m_buffer <- st_buffer(sunucentri_100_lapas,3000)
+sunucentri_300m_buffer <- st_buffer (sunucentri_300_lapas, 3000)
+```
+
+```{r, pirmais_variants}
+#ik 100 m tīkla centram, kā aprakstāmo rastru izmantojot iepriekšējos uzdevumos sagatavoto lauku klātbūtni 10 m šūnā;
+fun_100m_10m <- function(sunucentri_100m_buffer, lauki_10m_crop, ref_100vec) {
+  temp <- sunucentri_100m_buffer
+  temp$mean_lauki <- exact_extract(lauki_10m_crop, temp, fun = "mean")
+  ref_100vec <- left_join(
+    ref_100vec, 
+    dplyr::select(as.data.frame(temp), id, mean_lauki), 
+    by = "id"
+  )
+}
+laiks1 <- microbenchmark(
+  {
+    temp_buff <- sf::st_as_sf(sunucentri_100m_buffer)  
+    temp_vec <- dplyr::as_tibble(ref_100vec)           
+    fun_100m_10m(temp_buff, lauki_10m_crop, temp_vec)
+  },
+  times = 3 #atļāvos samazināt uz 3 atkārtojumiem, jo ļoti ilgi iet ar 10, 1 reize bija ap 170 minūtēm
+)
+```
+```{r,otrais_variants}
+#ik 100 m tīkla centram, kā aprakstāmo rastru izmantojot iepriekšējos uzdevumos sagatavoto lauku īpatsvaru 100 m šūnā;
+fun_100m_100m <- function(sunucentri_100m_buffer, lauki_100m_crop, ref_100vec) {
+  temp <- sunucentri_100m_buffer
+  temp$mean_lauki <- exact_extract(lauki_100m_crop, temp, fun = "mean")
+  ref_100vec <- left_join(
+    ref_100vec, 
+    dplyr::select(as.data.frame(temp), id, mean_lauki), 
+    by = "id"
+  )
+}
+laiks2 <- microbenchmark(
+  {
+    temp_buff <- sf::st_as_sf(sunucentri_100m_buffer)  
+    temp_vec <- dplyr::as_tibble(ref_100vec)           
+    fun_100m_100m(temp_buff, lauki_100m_crop, temp_vec)
+  },
+  times = 10
+)
+```
+```{r,tresais_variants}
+#ik 300 m tīkla centram, kā aprakstāmo rastru izmantojot iepriekšējos uzdevumos sagatavoto lauku klātbūtni 10 m šūnā, savienojiet iegūtos rezultātus ar 100 m tīklu, izmantojot kopīgos identifikatorus;
+fun_300m_10m <- function(sunucentri_300m_buffer, lauki_10m_crop, ref_100vec) {
+  temp <- sunucentri_300m_buffer
+  temp$mean_lauki <- exact_extract(lauki_10m_crop, temp, fun = "mean")
+  ref_100vec <- left_join(
+    ref_100vec, 
+    dplyr::select(as.data.frame(temp), rinda300, mean_lauki), 
+    by = "rinda300"
+  )
+}
+laiks3 <- microbenchmark(
+  {
+    temp_buff <- sf::st_as_sf(sunucentri_300m_buffer)  
+    temp_vec <- dplyr::as_tibble(ref_100vec)           
+    fun_300m_10m(temp_buff, lauki_10m_crop, temp_vec)
+  },
+  times = 10
+)
+```
+```{r,ceturtais_variants}
+#ik 300 m tīkla centram, kā aprakstāmo rastru izmantojot iepriekšējos uzdevumos sagatavoto lauku īpatsvaru 100 m šūnā, savienojiet iegūtos rezultātus ar 100 m tīklu, izmantojot kopīgos identifikatorus.
+fun_300m_100m <- function(sunucentri_300m_buffer, lauki_100m_crop, ref_100vec) {
+  temp <- sunucentri_300m_buffer
+  temp$mean_lauki <- exact_extract(lauki_100m_crop, temp, fun = "mean")
+  ref_100vec <- left_join(
+    ref_100vec, 
+    dplyr::select(as.data.frame(temp), rinda300, mean_lauki), 
+    by = "rinda300"
+  )
+}
+laiks4 <- microbenchmark(
+  {
+    temp_buff <- sf::st_as_sf(sunucentri_300m_buffer)  
+    temp_vec <- dplyr::as_tibble(ref_100vec)           
+    fun_300m_100m(temp_buff, lauki_100m_crop, temp_vec)
+  },
+  times = 10
+)
+```
+```{r,laiku_salidzinajums}
+laiks1_df <- as.data.frame(laiks1) %>%
+  mutate(time_min = time / 1e9 / 60)
+laiks2_df <- as.data.frame(laiks2) %>%
+  mutate(time_min = time / 1e9 / 60)
+laiks3_df <- as.data.frame(laiks3) %>%
+  mutate(time_min = time / 1e9 / 60)
+laiks4_df <- as.data.frame(laiks4) %>%
+  mutate(time_min = time / 1e9 / 60)
+print(laiks1_df$time_min)
+print(laiks2_df$time_min)
+print(laiks3_df$time_min)
+print(laiks4_df$time_min)
+```
+Kāds ir aprēķiniem nepieciešamais laiks katrā no četriem variantiem? Kādas tendences ir saskatāmas?: saskatāmas ir ļoti lielas atšķirības, bet kopumā rezultāts no 10m rastra ir daudz lēnāks, tāpat rezultāts izmantojot 100m šūnu centrus ir lēnāks
+Kādas ir novērotās lauku platības īpatsvara atšķirības? Kādas ir maksimālās teorētiski sagaidāmās atšķirības?: Apskatījos atšķirību starp 100m šūnu centriem, 10 rastram un 300m šūnu centriem 100m rastram, atšķirība ap 1%, tā, kā tīri teorētiski starp šiem būtu jābūt lielākajai atšķirībai, tad attiecīgi atšķirība ir nebūtiska un var strādāt ar ātrāko un resursu mazāk prasošo variantu, respektīvi 300m šūnu centriem un 100m rastru.
