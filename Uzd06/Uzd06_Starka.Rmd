@@ -1,0 +1,1132 @@
+---
+title: "Uzd06_Starka"
+author: "Rūta Starka"
+date: "2025-02-12"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Uzdevumam nepieciešamās pakotnes
+```{r packages, message=FALSE, warning=FALSE, results='hide', cache=TRUE}
+packages <- c("sf", "sfarrow", "terra", "tidyverse", "dplyr", "fasterize", "doParallel", "foreach", "ggplot2")
+missing_packages <- packages[!packages %in% installed.packages()[, "Package"]]
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages)
+}
+lapply(packages, require, character.only = TRUE)
+rm (missing_packages, packages)
+```
+
+# 1. LAD dati
+Ielasu 3. uzdevumā izveidoto LAD rastru. 
+Šis jāpārvērš par klasi 100.
+```{r LAD rastrs, cache=TRUE}
+LADrastrs=rast("../Uzd03/LAD_rastrs.tif")
+plot(LADrastrs)
+```
+
+Pārklasificēšu rastru. Piešķiršu vērtību 100 tiem pikseļiem, kuros LAD rastrā ir vērtība 1. Darīšu to ar premisē piedāvāto terra:subst(). 
+```{r LAD100, warning=FALSE, cache=TRUE}
+LAD100 <- subst(LADrastrs,  from = 1, to = 100)
+plot(LAD100)
+```
+
+Ir sanācis veiksmīgi. 
+Saglabāju kā jaunu slāni "klase100" un pagaidām novācu visu, kas attiecas uz LAD datiem.
+
+```{r LADexport, cache=TRUE}
+output_path <- "../Uzd06/klase100.tif"
+writeRaster(LAD100, output_path, overwrite = TRUE)
+rm(output_path, LAD100, LADrastrs)
+```
+
+# 2. Mežaudžu klasifikācija pēc dominējošās koku sugas
+Ielasu centra virsmežniecības datus.
+No tiem nofiltrēju zemes lietojuma kategoriju mežaudze (zkat=10).
+Tālāk klasificēju kā 2. uzdevumā, izmainu tikai kolonnu "Klasifikācija" no 2. uzd nomainot uz "klase", kur ieviešu nosaukumu "skujkoku", "šaurlapju", "platlapju" un "jauktu koku" vietā attiecīgi "204", "203", "202" un "201".
+
+```{r mezuKlases, warning=FALSE, cache=TRUE}
+centrs_kopa=st_read_parquet("../Uzd02/centrs_kopa2.parquet")
+centrs_kopa2= centrs_kopa %>% filter(zkat=="10")
+rm(centrs_kopa)
+
+#izveidotā klasifikācija
+skujkoki = c(1, 3, 13, 14, 15, 22, 23, 28, 29)
+saurlapji =c(4, 6, 8, 9, 19, 20, 21, 68)
+platlapji = c(10, 11, 12, 16, 17, 18, 24, 25, 26, 27, 32, 35, 50, 61, 62, 63, 64, 65, 66, 67)
+
+#kopējais šķērslaukums
+centrs_kopa2$skersl_visi=centrs_kopa2$g10+centrs_kopa2$g11+centrs_kopa2$g12+centrs_kopa2$g13+centrs_kopa2$g14
+
+#mežaudžu kategoriju veidojošo koku sugu kopējais šķerslaukums 1. stāvā
+centrs_kopa2$skersl_skujkoki = 
+  ifelse(centrs_kopa2$s10 %in% skujkoki, centrs_kopa2$g10,0) +
+  ifelse(centrs_kopa2$s11 %in% skujkoki, centrs_kopa2$g11,0) + 
+  ifelse(centrs_kopa2$s12 %in% skujkoki, centrs_kopa2$g12,0) + 
+  ifelse(centrs_kopa2$s13 %in% skujkoki, centrs_kopa2$g13,0) + 
+  ifelse(centrs_kopa2$s14 %in% skujkoki, centrs_kopa2$g14,0)
+
+centrs_kopa2$skersl_saurlapji = 
+  ifelse(centrs_kopa2$s10 %in% saurlapji, centrs_kopa2$g10,0) +
+  ifelse(centrs_kopa2$s11 %in% saurlapji, centrs_kopa2$g11,0) + 
+  ifelse(centrs_kopa2$s12 %in% saurlapji, centrs_kopa2$g12,0) + 
+  ifelse(centrs_kopa2$s13 %in% saurlapji, centrs_kopa2$g13,0) + 
+  ifelse(centrs_kopa2$s14 %in% saurlapji, centrs_kopa2$g14,0)
+
+centrs_kopa2$skersl_platlapji = 
+  ifelse(centrs_kopa2$s10 %in% platlapji, centrs_kopa2$g10,0) +
+  ifelse(centrs_kopa2$s11 %in% platlapji, centrs_kopa2$g11,0) + 
+  ifelse(centrs_kopa2$s12 %in% platlapji, centrs_kopa2$g12,0) + 
+  ifelse(centrs_kopa2$s13 %in% platlapji, centrs_kopa2$g13,0) + 
+  ifelse(centrs_kopa2$s14 %in% platlapji, centrs_kopa2$g14,0)
+
+#proporcija (dominance)
+centrs_kopa2$prop_skujkoki=centrs_kopa2$skersl_skujkoki/centrs_kopa2$skersl_visi
+centrs_kopa2$prop_saurlapji=centrs_kopa2$skersl_saurlapji/centrs_kopa2$skersl_visi
+centrs_kopa2$prop_platlapji=centrs_kopa2$skersl_platlapji/centrs_kopa2$skersl_visi
+
+#klasificēju, ablstoties uz 6.uzd nosacījumiem
+centrs_kopa2$klase=
+  ifelse(centrs_kopa2$prop_skujkoki>=0.75,"204",
+  ifelse(centrs_kopa2$prop_saurlapji>=0.75,"203",
+  ifelse(centrs_kopa2$prop_platlapji>=0.75,"202","201")))
+
+rm(platlapji, saurlapji, skujkoki)
+
+```
+
+Pārbaudu ģeometrijas. 
+```{r geomCheck, cache=TRUE}
+v=data.frame(geom_val=st_is_valid(centrs_kopa2$geometry, reason=TRUE))
+sort(unique(v$geom_val))
+
+```
+Slānis satur tikai korektas ģeometrijas.
+
+Pārbaudu izveidoto klasi. Pārveidoju par numeric, lai tālāk varētu darboties ar fasterize. 
+```{r klaseNumeric, cache=TRUE}
+str(centrs_kopa2$klase)#chr, jāpārvērš par numeric. 
+centrs_kopa2$klase=as.numeric(centrs_kopa2$klase)
+str(centrs_kopa2$klase)#ok, veiksmīgi pārvērsts skaitliskā
+
+#pārbaudu ģeometiju veidus
+table(st_geometry_type(centrs_kopa2))
+```
+Redzu, ka ir gan polygon, gan multipolygon, kas man sagādāja problēmas, tāpēc ieviesu sekojošo soli, kas konvertē poligonus par multipoligoniem. 
+
+```{r multipol, cache=TRUE}
+centrs_kopa2 <- st_cast(centrs_kopa2, "MULTIPOLYGON")
+```
+
+
+Ielasu references rastru, apgriežu līdz centra virsmežniecības robežām un pārvēršu par RasterLayer.
+```{r ref10m, cache=TRUE}
+ref_rastrs10m=rast("../Uzd03/ref_rastrs/LV10m_10km.tif")
+ref_rastrs10m_centrs = terra::crop(ref_rastrs10m,centrs_kopa2)
+ref_rastrs10m <- raster(ref_rastrs10m_centrs)
+rm(ref_rastrs10m_centrs)
+
+```
+
+Rasterizēju katru klasi. Sākotnēji gribēju veidot SpatRaster slāni, kas saturētu visas klases, bet pat sadalot darbu uz 2 CPU kodoliem operatīvā atmiņa to neizturēja. Tāpēc rasterizēju pa vienam pēc atlases. 
+
+```{r klasueksports, cache=TRUE, message=TRUE, warning=FALSE}
+skujk_mezi= centrs_kopa2 %>% filter(klase=="204")
+saurl_mezi=centrs_kopa2 %>% filter(klase=="203")
+platl_mezi=centrs_kopa2 %>% filter(klase=="202")
+jaukti_mezi=centrs_kopa2 %>% filter(klase=="201")
+
+rm(centrs_kopa2)
+#saglabāju drošības pēc katru kā geoparquet slāni
+st_write_parquet(skujk_mezi, dsn="skujk_mezi.parquet")
+st_write_parquet(saurl_mezi, dsn="saurl_mezi.parquet")
+st_write_parquet(platl_mezi, dsn="platl_mezi.parquet")
+st_write_parquet(jaukti_mezi, dsn="jaukti_mezi.parquet")
+
+#rasterizēju, pie reizes arī klasificējot pikseļu vērtības 0 sauszemei, NA ārpus Latvijas un pārējo pārklasificējot kā attiecīgo klasi (204, 203, 202, 201). Tā sanāk vienkāršāk, kā ar terra::classify.  nepieciešams izmanto
+skujk_rastrs=fasterize(skujk_mezi,ref_rastrs10m,field = "klase",background=0)
+skujk_rastrs[is.na(ref_rastrs10m)] = NA
+
+saurl_rastrs=fasterize(saurl_mezi,ref_rastrs10m,field = "klase", background=0)
+saurl_rastrs[is.na(ref_rastrs10m)] = NA
+
+platl_rastrs=fasterize(platl_mezi,ref_rastrs10m,field = "klase", background=0)
+platl_rastrs[is.na(ref_rastrs10m)] = NA
+
+jaukti_rastrs=fasterize(jaukti_mezi,ref_rastrs10m,field = "klase", background=0)
+jaukti_rastrs[is.na(ref_rastrs10m)] = NA
+
+#noņemu vektordatus
+rm(skujk_mezi,saurl_mezi, platl_mezi, jaukti_mezi)
+```
+
+Apskatu, kas sanācis. 
+
+```{r rastru2apskate, cache=TRUE}
+par(mfrow = c(2, 2))
+
+plot(skujk_rastrs, main = "Skujkoku meži")
+plot(saurl_rastrs, main = "Šaurlapju meži")
+plot(platl_rastrs, main = "Platlapju meži")
+plot(jaukti_rastrs, main = "Jauktu koku meži")
+```
+
+Atiestatu par() funkciju. 
+```{r parAtiest, cache=TRUE}
+par(mfrow = c(1, 1))
+```
+
+Saglabāju kā rastra slāņus un noņemu no vides pagaidām.
+
+```{r rastru2saglabasana, cache=TRUE}
+writeRaster(skujk_rastrs, "klase204.tif", overwrite = TRUE)
+writeRaster(saurl_rastrs, "klase203.tif", overwrite = TRUE)
+writeRaster(platl_rastrs, "klase202.tif", overwrite = TRUE)
+writeRaster(jaukti_rastrs, "klase201.tif", overwrite = TRUE)
+
+rm(skujk_rastrs, saurl_rastrs, platl_rastrs, jaukti_rastrs)
+```
+
+# 3. Vecumklases ieviešana
+Atkarībā no valdošās sugas koku vecuma un tai noteiktā ciršanas vecuma kokaudzi ieskaita vienā no 5 vecumgrupām: 
+  *jaunaudzē (pirmo 2 vecumklašu audzes)
+  *vidēja vecuma audzē (vecumklase/-s starp jaunaudzēm un briestaudzēm) 
+  *briestaudzē (viena vecumklase pirms ciršanas vecuma)
+  *pieaugušā audzē (divas vecumklases sākot ar ciršanas vecumu) 
+  *pāraugušā audzē (audzes, kuru vecums pārsniedz pieaugušo audžu vecumu). 
+  
+Skujkoku un cieto lapkoku audzēm pieņemtais vecumklases intervāls ir 20 gadu, mīkstajiem lapu kokiem — 10 gadu un īpaši ātraudzīgajiem kokiem (baltalkšņiem, blīgznām un vītoliem) — 5 gadi.
+
+Cietie lapukoki, no mežistrādes viedokļa, ir ozols, osis, goba un dižskabārdis. 
+Mīkstie lapukoki ir apse un vispār arī alkšņi, tad nu pieņemšu melnalksni, jo baltalkšņi jau ir definēti pie ātraudzīgajiem. Ātraudzīgie ir definēti augstāk. Bērzs ir uz jautājuma zīmes, jo pēc koksnes cietības tas ir cietais lapkoks (kam būtu 20 gadu intervāls), bet pēc ekoloģijas man šķeit tas drīzāk ir ātraudzīgais (kam būtu 5 gadu intervāls), tāpēc šajā uzdevumā es likšu bērzu pie 10 gadu intervāla. Protams, tas viss tāpat ir relatīvi, jo arī koksnes cietība ir atkarīga no augšanas apstākļiem. 
+
+Ciršanas vecumu nosaka meža likums, atkarībā no bonitātes un valdošās koku sugas. 
+
+Šo visu apkopojot saprotu, ka patiesībā tas viss nav tik vienkārši. Piemēram, mana mežu klasifikācija (2. uzdevums un šī uzdevuma 2. apakšuzevums), piemēram, apkopo priedes un egles vienā skujkoku mežu klasē, tomēr meža likums nosaka, ka šīm abām sugām ir atšķirīgs ciršanas vecums (priedei 101 gads, eglei 81 gads pieņemot I bonitāti), kas jau ir vienas vecumklases intervāla atšķirība. 
+Pareizā pieeja būtu tad visu klasificēt pa jaunam, atkarībā no valdošās koku sugas (nevis pēc piederības mežu klasei kā 2.uzd). Tomēr meža likumā nav minētas visas koku sugas, kādas reģistrētas MVR datos, kas nozīmētu atkal informācijas zaudēšanu klasifikācijai pieejot no koka sugas.
+
+MVR datos pirmā stāva 1. koku sugas vecums (gados) atrodams datubāzes laukā "A10". Vēl ir pirmā stāva otrā līdz piektā suga (attiecīgi A11-A14), un šo otro līdz piekto koku sugu pirmajā stāvā šķērslaukums ir ņemts vērā klasificējot mežus pie skujkoku, šaurlapju u.t.t. Tomēr lai nesarežģītu jau tā sarežģīto klasifikāciju, rēķinot vecumklases, ņemšu vērā tikai valdošo pirmā stāva koku vecumu.
+
+## Skujkoku meži
+Tad nu ņemot vērā egļu un priežu ciršanas vecumu atšķirības, skujkoku mežiem pieņemšu vecumklases intervālu 20 gadi (rēķināšu no lauka "A10"), bet vecumgrupu piešķieršu vēlāk, atkarībā no koku sugas laukā "s10". Aprēķinus veikšu geoparquet failā, ko izveidoju skujkoku mežiem 2. apakšuzdevumā.
+
+P.S. Šis ir moments ar kuru sākot es būtu varējusi būt gudrāka, ja ignorētu to, ka vecumklases apzīmē ar romiešu cipariem (un pat tad, gan jau var transformēt). Bet es atstāju šo savu oriģinālo risinājumu, lai ir redzams, cik primitīvi strādā mans prāts un cik ļoti man patīk rakstīt garas komandrindas. Noņemu sev vismaz divas balles par šo. 
+
+```{r skujkVecumklases, cache=TRUE}
+skujkoki=st_read_parquet("skujk_mezi.parquet")
+str(skujkoki)#A10 lauks ir numeric, tad varu klasificēt vecumu
+max(skujkoki$a10)# vecākais mežs ir 309 gadus vecs, tad jātaisa 16 vecumklases.
+#klasificēju, piešķirot romieču ciparus, kā pieņemts vecumklasēm.
+skujkoki= skujkoki %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 20  ~ "I",
+    a10 >= 21 & a10 <= 40  ~ "II",
+    a10 >= 41 & a10 <= 60  ~ "III",
+    a10 >= 61 & a10 <= 80  ~ "IV",
+    a10 >= 81 & a10 <= 100 ~ "V",
+    a10 >= 101 & a10 <= 120 ~ "VI",
+    a10 >= 121 & a10 <= 140 ~ "VII",
+    a10 >= 141 & a10 <= 160 ~ "VIII",
+    a10 >= 161 & a10 <= 180 ~ "IX",
+    a10 >= 181 & a10 <= 200 ~ "X",
+    a10 >= 201 & a10 <= 220 ~ "XI",
+    a10 >= 221 & a10 <= 240 ~ "XII",
+    a10 >= 241 & a10 <= 260 ~ "XIII",
+    a10 >= 261 & a10 <= 280 ~ "XIV",
+    a10 >= 281 & a10 <= 300 ~ "XV",
+    a10 >= 301 & a10 <= 320 ~ "XVI",
+  ))
+sort(unique(skujkoki$vecumklase))#pārbaudu
+```
+Nu tagad šī te daļa, kurā jāskatās kas ir laukā s10 (jeb suga), lai varētu noteikt vecumklasi. Citiem mežiem šis varbūt ir mazāk būtiski, bet ņemot vērā, ka priedes un egles ir Latvijā biežāk sastopamie koki un nezinu ar kādu proporciju tās ir šajā teritorijā, tad nebūtu korekti tās vecumgrupu klasificēt kopā. 
+
+Paskatos gadījumu skaitu vērtībām laukā "s10". 
+
+```{r s10skujkokiem, cache=TRUE}
+table(skujkoki$s10)
+
+```
+Tātad priede (1,14, 22) un lapegle (13) pēc meža likuma sasniedz cirsmas vecumu 101 gadu vecumā (vecumklase VI). Egle (3, 15, 23) - 81 gadu vecumā (vecumklase V). Meža likumā nav izdalītas priežu un egļu sugas, tāpēc saliku kopā pēc savas interpretācijas.
+Redzams, ka pie valdošajām sugām parādās arī, piemēram, bērzs (4). Tas ir tāpēc, ka klasificēju pēc šķērslaukuma, acīmredzot šajos četros poligonos ir vai nu kaut kādi kļūdaini dati vai netipiska situācija, kur pirmā stāva pirmajai sugai ir mazs šķērslaukums. Šeit sanāk tad ļoti muļķīgi, jo itkā skujkoku meži, bet pirmajā stāvā valdošā suga ir bērzs, kam ciršanas vecums ir 71 gads, kas nozīmē atkal vecumgrupas pārklasifikāciju. Papildus, jāņem vērā, ko iepriekš rakastīju par koksnes cietību, kas nosaka vecumklases intervālu. Izdarīšu slikti un vienkārši ignorēšu šos 4 poligonus (atstāšu tur NA vecumgrupas laukā), jo tie veido niecīgu daļu no skujkoku mežiem. Tos nepazaudēšu, ielasot klasi 204 kad apvienošu rastrus.
+
+Tātad izveidoju uz nosacījumiem balstītu klasifikāciju, ieviešot jaunu lauku "vecumgrupa", kas saturēs vērtības 1-5, kur 1 ir jaunaudze un 5 ir pāraugusi audze. 
+Tajā ievietotās vērtības būs uz nosacījumiem balstītas. 
+
+Ja laukā s10 ir vērtības 1, 13, 14 vai 22 (priedes un lapegles), tad kā 
+1. vecumgrupa (jaunaudzes) pieder I un II vecumklases
+2. vecumgrupa (vidēja vecuma) pieder III un IV vecumklases
+3. vecumgrupa (briestaudzes) pieder V vecumklase
+4. vecumgrupa (pieaugušas audzes) pieder VI un VII vecumklase
+un
+5. vecumgrupa (pāraudzis mežs) viss pārējais, sākot ar VIII vecumklasi.
+
+
+Savukāt, ja laukā s10 ir vērtības 3, 15 vai 23 (egles), tad kā 
+1. vecumgrupa (jaunaudzes) pieder I un II vecumklases
+2. vecumgrupa (vidēja vecuma) pieder III vecumklase
+3. vecumgrupa (briestaudzes) pieder IV vecumklase
+4. vecumgrupa (pieaugušas audzes) pieder V un VI vecumklase
+un
+5. vecumgrupa (pāraudzis mežs) viss pārējais, sākot ar VII vecumklasi.
+
+Papildus, tiem četriem atlikušajiem poligoniem nolēmu vecumgrupu aizstāt ar NA šoreiz.
+
+```{r skujkVecumgrupas, cache=TRUE}
+skujkoki <- skujkoki %>%
+  mutate(vecumgrupa = case_when(
+    # priedes un lapegles
+    s10 %in% c("1", "13", "14", "22") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("1", "13", "14", "22") & vecumklase %in% c("III", "IV") ~ "2",
+    s10 %in% c("1", "13", "14", "22") & vecumklase == "V"  ~ "3",
+    s10 %in% c("1", "13", "14", "22") & vecumklase %in% c("VI", "VII") ~ "4",
+    s10 %in% c("1", "13", "14", "22")  ~ "5", 
+    
+    # egles
+    s10 %in% c("3", "15", "23") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("3", "15", "23") & vecumklase == "III" ~ "2",
+    s10 %in% c("3", "15", "23") & vecumklase == "IV"  ~ "3",
+    s10 %in% c("3", "15", "23") & vecumklase %in% c("V", "VI")  ~ "4",
+    s10 %in% c("3", "15", "23")  ~ "5",  
+
+    # pārējie lai ir NA
+    TRUE ~ NA_character_
+  ))
+
+#pārbaudu struktūru
+str(skujkoki$vecumgrupa) 
+
+#apskatu poligonu skaitu katrā vecumgrupā
+table(skujkoki$vecumgrupa, useNA = "ifany")
+```
+Laikam ir normāli. Trūkst tieši 4 poligoni, kā arī to biju paredzējusi. 
+
+Tagad jāveic lauka "klase" otrā cipara aizvietošana ar skaitli no vecumgrupas.
+Klase tika kodēta kā skaitlis, tāpēc sākumā to pārvēršu par "chr", jo arī vecumgrupa ir "chr". Tad, varu izvilkt klases pirmo ciparu, tad ievietot vecumgrupu, un tad ievietot klases trešo ciparu. Protams, ja būs NA, tad pēc noklusējuma šis dos 2NA4, kas nekam neder, tāpēc pieņēmum lēmumu šādos gadījumos (kādi ir četri), atstāt klasi 204. Tas nozīmē, ka klase 204 (un pēcāk arī pārējās klases ar nulli pa vidu) saturēs mežus, kuriem nav informācijas par vecumgrupu, un tādi poligoni būs maz. Manuprāt, tā ir ok pieeja, jo citādi, ja klase 204 saturēs informāciju par visiem mežiem (paliks nemainīta), tad sanāks, ka slāņus apvienojot 4. uzdevumā, tie būs pa virsu tagad saklasificētajiem mežiem (jo skaitliski mazāka vērtība), un tas nebūs loģiski.
+Varētu jau arī kaut kādu citu lēmumu pieņemt, protams. 
+
+```{r skujk204aizv, cache=TRUE}
+str(skujkoki) #klase ir numeric
+skujkoki$klase=as.character(skujkoki$klase)#pārvēršu par chr
+
+#veicu aizvietošanu, paredzot, ka ja ir NA, tad lai paliek klase 204
+skujkoki <- skujkoki %>%
+  mutate(klase = ifelse(
+    is.na(vecumgrupa), 
+    klase,
+    paste0(substr(klase, 1, 1), as.character(vecumgrupa), substr(klase, 3, 3))
+  ))
+
+#apskatu, kas sanācis
+sort(unique(skujkoki$klase))
+```
+Tad prezentēju ciklu, kura veiksmīga izveide man prasīja vairākus dusmīgus vakarus.
+
+```{r skujRasterCikls, eval=FALSE, cache=TRUE}
+for (klase_value in unique(skujkoki$klase)) {
+  subset_sf <- skujkoki[skujkoki$klase == klase_value, ]
+  subset_sf$rastr_value <- as.numeric(klase_value)
+  
+  rastrs <- fasterize(subset_sf, ref_rastrs10m, field = "rastr_value", background=0)
+  rastrs[is.na(ref_rastrs10m)] = NA
+  
+  filename <- paste0("klase", klase_value, ".tif")
+  writeRaster(rastrs, filename, overwrite = TRUE)
+}
+
+rm(skujkoki)
+```
+
+
+Un tad paliku pie sava vecā, manuāli ietilpīgā piegājiena, kas man vislabāk gāja:
+```{r skujkRasterV1, echo=TRUE, cache=TRUE}
+#pārvēršu klasi par skaitlisku mainīgo
+skujkoki$klase <- as.numeric(skujkoki$klase)
+
+#filtrēju pēc klases
+skujk_204= skujkoki %>% filter(klase=="204")
+skujk_214= skujkoki %>% filter(klase=="214")
+skujk_224= skujkoki %>% filter(klase=="224")
+skujk_234= skujkoki %>% filter(klase=="234")
+skujk_244= skujkoki %>% filter(klase=="244")
+skujk_254= skujkoki %>% filter(klase=="254")
+
+#rasterizēju 
+skujk_204r=fasterize(skujk_204,ref_rastrs10m,field = "klase",background=0)
+skujk_204r[is.na(ref_rastrs10m)] = NA
+
+skujk_214r=fasterize(skujk_214,ref_rastrs10m,field = "klase",background=0)
+skujk_214r[is.na(ref_rastrs10m)] = NA
+
+skujk_224r=fasterize(skujk_224,ref_rastrs10m,field = "klase",background=0)
+skujk_224r[is.na(ref_rastrs10m)] = NA
+
+skujk_234r=fasterize(skujk_234,ref_rastrs10m,field = "klase",background=0)
+skujk_234r[is.na(ref_rastrs10m)] = NA
+
+skujk_244r=fasterize(skujk_244,ref_rastrs10m,field = "klase",background=0)
+skujk_244r[is.na(ref_rastrs10m)] = NA
+
+skujk_254r=fasterize(skujk_254,ref_rastrs10m,field = "klase",background=0)
+skujk_254r[is.na(ref_rastrs10m)] = NA
+
+#saglabāju rastrus uz diska
+writeRaster(skujk_204r, "klase204.tif", overwrite = TRUE)
+writeRaster(skujk_214r, "klase214.tif", overwrite = TRUE)
+writeRaster(skujk_224r, "klase224.tif", overwrite = TRUE)
+writeRaster(skujk_234r, "klase234.tif", overwrite = TRUE)
+writeRaster(skujk_244r, "klase244.tif", overwrite = TRUE)
+writeRaster(skujk_254r, "klase254.tif", overwrite = TRUE)
+
+```
+
+apskatīšu, kā sanācis. 
+```{r skujkokuRezultats, cache=TRUE}
+par(mfrow = c(3, 2))
+
+plot(skujk_204r, main = "Skujkoku NA vecumklase")
+plot(skujk_214r, main = "Skujkoku I vecumklase")
+plot(skujk_224r, main = "Skujkoku II vecumklase")
+plot(skujk_234r, main = "Skujkoku III vecumklase")
+plot(skujk_244r, main = "Skujkoku IV vecumklase")
+plot(skujk_254r, main = "Skujkoku V vecumklase")
+```
+
+Atiestatu grafiku izvietojumu un novācu objektus no vides.
+```{r skujkokuTirisana, warning=FALSE, cache=TRUE}
+par(mfrow = c(1, 1))
+rm(skujkoki)
+rm(skujk_204,skujk_214, skujk_224, skujk_234, skujk_244, skujk_254, skujk_204r, skujk_214r, skujk_224r, skujk_234r, skujk_244r, skujk_254r)
+```
+
+
+Nu tad atliek pēc līdzīgiem principiem ieviest vecuma klasifikāciju arī citiem mežiem. 
+
+## Šaurlapju meži
+
+Ielasu šaurlapju mežu geoparquet failu un apskatu no kādām dominējošājām koku sugām tie veidoti. 
+```{r saurlSugas, cache=TRUE}
+saurlapji=st_read_parquet("saurl_mezi.parquet")
+table(saurlapji$s10)
+```
+Nu, visbiežāk, protams, ir bērzi (4), baltalkšņi (9), apses (8), un melnalkšņi (6) (kas jau nosaka atšķirīgu vecumklases intervālu). Tomēr nevar ignorēt arī citus valdošos kokus. Būs jāveic baigā klasificēšana. 
+
+Atkārtošu, ka:
+* 20 gadu vecumklases intervāls ir - ozols (nav šeit), osis (11), goba (nav) un dižskabārdis (nav); papildus jāparedz arī priedes (1)
+* 10 gadu vecumklases intervāls ir - apse (8), papele(19), melnalkšņi (6), bērzi (4);
+* 5 gadu vecumklases intervāls ir - baltalkšņiem (9), blīgznām (21) un vītoliem (20).
+
+Līdz ar to tagad klasifikācija būs vēl sarežģītāka nekā iepriekš, jo vajadzēs izšķirt ne tikai dažādas vecumgrupas, bet arī pirms tam vecumklases. Tas kā to varētu izdarīt, ir uztiasīt trīs subsetus šiem datiem, tad klasificēt vecumklases, tad salīmēt atpakaļ kopā un tad var kopīgi sadalīt pa vecumgrupām.
+
+Izveidoju atlases un izveidoju vecumklases vienu pēc otras.
+
+Sākšu ar tiem šaurlapju mežiem, kuriem vecumaklases intervāls ir 20 gadi un tie ir retie ošu meži, un tad daži egļu un priežu meži, kas te ir pamanījušies būt pēc šķērslaukuma. Tādi ir tikai trīs poligoni šajos datos. Apskatu konkrētās vērtības un klasificēju.
+```{r saurlapju20Vecumklases, cache=TRUE}
+saurlapji20= saurlapji %>% filter(s10 == "11"|s10 == "1"|s10 == "3")
+max(saurlapji20$a10)# vecākais mežs ir 139 gadus vecs, tātad vajag VII vecumklases.
+saurlapji20= saurlapji20 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 20  ~ "I",
+    a10 >= 21 & a10 <= 40  ~ "II",
+    a10 >= 41 & a10 <= 60  ~ "III",
+    a10 >= 61 & a10 <= 80  ~ "IV",
+    a10 >= 81 & a10 <= 100 ~ "V",
+    a10 >= 101 & a10 <= 120 ~ "VI",
+    a10 >= 121 & a10 <= 140 ~ "VII"))
+
+table(saurlapji20$vecumklase)#pārbaudu un ir ok. 
+```
+Turpināšu ar tiem mežiem, kuriem vecumklases intervāls ir 10 gadi. 
+
+```{r saurlapju10Vecumklases, cache=TRUE}
+saurlapji10= saurlapji %>% filter(s10 == "4"|s10== "6"|s10== "8"|s10== "19")
+max(saurlapji10$a10)# vecākais mežs ir 170 gadus vecs, tātad vajag XVII vecumklases. 
+saurlapji10= saurlapji10 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 10  ~ "I",
+    a10 >= 11 & a10 <= 20  ~ "II",
+    a10 >= 21 & a10 <= 30  ~ "III",
+    a10 >= 31 & a10 <= 40  ~ "IV",
+    a10 >= 41 & a10 <= 50 ~ "V",
+    a10 >= 51 & a10 <= 60 ~ "VI",
+    a10 >= 61 & a10 <= 70  ~ "VII",
+    a10 >= 71 & a10 <= 80  ~ "VIII",
+    a10 >= 81 & a10 <= 90  ~ "IX",
+    a10 >= 91 & a10 <= 100 ~ "X",
+    a10 >= 101 & a10 <= 110 ~ "XI",
+    a10 >= 111 & a10 <= 120  ~ "XII",
+    a10 >= 121 & a10 <= 130  ~ "XIII",
+    a10 >= 131 & a10 <= 140  ~ "XIV",
+    a10 >= 141 & a10 <= 150 ~ "XV",
+    a10 >= 151 & a10 <= 160 ~ "XVI",
+    a10 >= 161 & a10 <= 170  ~ "XVII"))
+
+table(saurlapji10$vecumklase)#pārbaudu un ir ok. 
+```
+Turpinu ar pēdējo atlasi - mežiem, kam vecumklases intervāls ir 5 gadi. 
+
+```{r saurlapju5Vecumklases, cache=TRUE}
+saurlapji5= saurlapji %>% filter(s10 == "9"|s10== "20"|s10== "21")
+max(saurlapji5$a10)# vecākais mežs ir 134 gadus vecs, tātad vajag XXVII vecumklases (ak vai). 
+saurlapji5= saurlapji5 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 5  ~ "I",
+    a10 >= 6 & a10 <= 10  ~ "II",
+    a10 >= 11 & a10 <= 15  ~ "III",
+    a10 >= 16 & a10 <= 20  ~ "IV",
+    a10 >= 21 & a10 <= 25 ~ "V",
+    a10 >= 26 & a10 <= 30 ~ "VI",
+    a10 >= 31 & a10 <= 35  ~ "VII",
+    a10 >= 36 & a10 <= 40  ~ "VIII",
+    a10 >= 41 & a10 <= 45  ~ "IX",
+    a10 >= 46 & a10 <= 50 ~ "X",
+    a10 >= 51 & a10 <= 55 ~ "XI",
+    a10 >= 56 & a10 <= 60  ~ "XII",
+    a10 >= 61 & a10 <= 65  ~ "XIII",
+    a10 >= 66 & a10 <= 70  ~ "XIV",
+    a10 >= 71 & a10 <= 75 ~ "XV",
+    a10 >= 76 & a10 <= 80 ~ "XVI",
+    a10 >= 81 & a10 <= 85  ~ "XVII",
+    a10 >= 86 & a10 <= 90  ~ "XVIII",
+    a10 >= 91 & a10 <= 95  ~ "XIX",
+    a10 >= 96 & a10 <= 100 ~ "XX",
+    a10 >= 101 & a10 <= 105 ~ "XXI",
+    a10 >= 106 & a10 <= 110  ~ "XXII",
+    a10 >= 111 & a10 <= 115  ~ "XXIII",
+    a10 >= 116 & a10 <= 120  ~ "XXIV",
+    a10 >= 121 & a10 <= 125 ~ "XXV",
+    a10 >= 126 & a10 <= 130 ~ "XXVI",
+    a10 >= 131 & a10 <= 135  ~ "XXVII"
+    ))
+
+table(saurlapji5$vecumklase)#pārbaudu un ir ok. 
+```
+Tagad salīmēšu atpakaļ kopā un pārbaudīšu, vai kopējais objektu skaits sakrīt ar oriģinālo (141426 poligoni).
+
+```{r saurlapjiSalim, cache=TRUE}
+saurlapji2 <- bind_rows(saurlapji5, saurlapji10, saurlapji20)
+str(saurlapji2)#objektu skaits sakrīt
+sort(unique(st_is_valid(saurlapji2)))#ģeometrijas pareizas
+rm(saurlapji5, saurlapji10, saurlapji20)
+```
+
+Tālāk jāievieš vecumgrupas. Te atkal "čakars", jo jāskatās meža likums un jākombinē s10 un vecumklases lauki, lai izveidotu vecumgrupu. Bet protams, dzīve nav vienkārša. Vairākām koku sugām meža likums nenosaka galvenās cirtes vecumu, līdz ar to nav iespējams kategorizēt piederību vecumgrupai. Šādas sugas klasificētajos šaurlapju mežos (atkal uzsveru, ka piederība mežu grupai nav balstīta tikai uz s10 lauku) ir baltalksnis, papele, vītols un blīgzna. Meži, kuros s10 laukā attiecīgi norādītas šīs sugas, paliks neklasificēti vecumgrupās (paliks kā klase 210, kas sagādās problēmas pie apvienošanas apakšuzdevuma, jo šie sanāks kā "primārie", jeb virspusē, bet nu tie tāpat nepārklāsies ar citiem mežu rastriem, jo tie veidoti no viena slāņa).  
+
+Tātad vecumgrupas ieviešu šādi:
+```{r saurlapjiVecumgrupas, cache=TRUE}
+saurlapji2 <- saurlapji2 %>%
+  mutate(vecumgrupa = case_when(
+    # priede, ciršanas vecums 101, vecumklases intervāls 20 
+    s10 %in% "1" & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% "1" & vecumklase %in% c("III", "IV", "V", "VI") ~ "2",
+    s10 %in% "1" & vecumklase == "VII"  ~ "3",
+    s10 %in% "1" & vecumklase %in% c("VIII", "IX") ~ "4",
+    s10 %in% "1"  ~ "5", #NAV ŠAJOS DATOS  
+    
+    # bērzs, melnalksnis, ciršanas vecums 71, vecumklases intervāls 10
+    s10 %in% c("4", "6") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("4", "6") & vecumklase %in% c("III", "IV", "V", "VI") ~ "2",
+    s10 %in% c("4", "6") & vecumklase == "VII"  ~ "3",
+    s10 %in% c("4", "6") & vecumklase %in% c("VIII", "IX")  ~ "4",
+    s10 %in% c("4", "6")  ~ "5",  
+
+    #apse, ciršanas vecums 41, vecumklases intervāls 10
+    s10 %in% "8" & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% "8" & vecumklase == "III" ~ "2",
+    s10 %in% "8" & vecumklase == "IV"  ~ "3",
+    s10 %in% "8" & vecumklase %in% c("V", "VI") ~ "4",
+    s10 %in% "8"  ~ "5", 
+    
+    # pārējie lai ir NA, paliks neklasificētas, jo tām meža likums nav noteicis ciršanas vecumu (vai arī es nemāku lasīt).
+    TRUE ~ NA_character_
+  ))
+
+#pārbaudu struktūru
+str(saurlapji2$vecumgrupa)  # chr
+
+#apskatu poligonu skaitu katrā vecumgrupā
+table(saurlapji2$vecumgrupa, useNA = "ifany")
+```
+Nu... esmu ļoti apbēdināta, jo vairāk kā 31 tūkst. mežaudžu ir palikušas neklasificētas. Vai nu es esmu pārlieku visu sarežģījusi, vai arī faktiski tas sanāk normāli, ņemot vērā klasificēšanas nosacījumus. 
+
+Veicu klases otrās vērtības aizvietošanu ar vecumgrupu, paredzot, ka ja ir NA, tad lai paliek klase 203.
+
+```{r saurl203aizv, cache=TRUE}
+str(saurlapji2$klase) #klase ir numeric
+saurlapji2$klase=as.character(saurlapji2$klase)#pārvēršu par chr
+
+#veicu aizvietošanu, paredzot, ka ja ir NA, tad lai paliek klase 203
+saurlapji2 <- saurlapji2 %>%
+  mutate(klase = ifelse(
+    is.na(vecumgrupa), 
+    klase,
+    paste0(substr(klase, 1, 1), as.character(vecumgrupa), substr(klase, 3, 3))
+  ))
+
+#apskatu, kas sanācis
+table(saurlapji2$klase)
+```
+Te viss kārtībā.
+
+Atlasu, rasterizēju un saglabāju slāņus, kas tika klasificēti. 
+```{r saurlRasterCikls, echo=TRUE, cache=TRUE}
+for (klase_value in unique(saurlapji2$klase)) {
+  subset_sf <- saurlapji2[saurlapji2$klase == klase_value, ]
+  subset_sf$rastr_value <- as.numeric(klase_value)
+  
+  rastrs <- fasterize(subset_sf, ref_rastrs10m, field = "rastr_value", background=0)
+  rastrs[is.na(ref_rastrs10m)] = NA
+  
+  filename <- paste0("klase", klase_value, ".tif")
+  writeRaster(rastrs, filename, overwrite = TRUE)
+}
+```
+
+## Platlapju meži
+Tas pats platlapjiem. 
+Ielasu un apskatu sugas.
+
+```{r platlSugas, cache=TRUE}
+platlapji=st_read_parquet("platl_mezi.parquet")
+table(platlapji$s10)
+```
+Visbiežāk sastopami oši (11), ozoli (10 un 61), kļava (24 un 63), goba un vīksna (16), liepa (12), un tad ir visādi "krikuči" kā dižskabārdis (17), saldais ķirsis (interesanti) (25), viena egļu mežaudze (3), pīlādžu (32), ievu (35), akācijas (50) un zirgkastaņi (67). 
+
+Tagad par vecumklasēm. 
+* 20 gadu vecumklases intervāls no šeit pārstāvētajām sugām ir - 
+ozols (10 un 61), 
+osis (11), 
+goba (un vīksnu te nevar atdalīt) (16) 
+dižskabārdis (17)
+kļavas (24 un 63), jo tā MK noteikumu Nr. 935 pielikumos minēta kopā ar šīm sugām
+zirgkastaņiem (67) (Vienā LVM mācību materiālā atradu)
+egle (3) - ir viena šāda mežaudze kaut kā gadījusies.
+
+* 10 gadu vecumklases intervāls no šeit pārstāvētajām ir - 
+liepa (12)
+ķirsis (25)
+
+
+* 5 gadu vecumklases intervāls no šeit pārstāvētajām ir - 
+pīlādzis (32) un ievas (35), lai gan šādas mežaudzes kopā ir tikai sešas.
+
+Savukārt, akācijām (50) nav definēts vecumklašu intervāls. 
+
+Taisīšu atkal trīs subsetus šiem datiem, lai klasificētu vecumklases, tad salīmēšu atpakaļ kopā un tad dalīšu pa vecumgrupām kā iepriekš.
+
+Izveidoju atlases un izveidoju vecumklases vienu pēc otras.
+
+Sākšu ar vecumaklases intervālu 20 gadi.
+```{r platlapju20Vecumklases, cache=TRUE}
+platlapji20= platlapji %>% filter(s10 == "10"|s10 == "11"|s10 == "16"|s10 == "17"|s10 == "24"|s10 == "3"|s10 == "61"|s10 == "63"|s10 == "67")
+max(platlapji20$a10)# vecākais mežs ir 322 gadus vecs, tātad vajag XVII vecumklases (priecājos par šiem mežiem, bet nožēloju savu pieeju to klasificēšanā).
+platlapji20= platlapji20 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 20  ~ "I",
+    a10 >= 21 & a10 <= 40  ~ "II",
+    a10 >= 41 & a10 <= 60  ~ "III",
+    a10 >= 61 & a10 <= 80  ~ "IV",
+    a10 >= 81 & a10 <= 100 ~ "V",
+    a10 >= 101 & a10 <= 120 ~ "VI",
+    a10 >= 121 & a10 <= 140 ~ "VII",
+    a10 >= 141 & a10 <= 160 ~ "VIII",
+    a10 >= 161 & a10 <= 180 ~ "IX",
+    a10 >= 181 & a10 <= 200 ~ "X",
+    a10 >= 201 & a10 <= 220 ~ "XI",
+    a10 >= 221 & a10 <= 240 ~ "XII",
+    a10 >= 241 & a10 <= 260 ~ "XIII",
+    a10 >= 261 & a10 <= 280 ~ "XIV",
+    a10 >= 281 & a10 <= 300 ~ "XV",
+    a10 >= 301 & a10 <= 320 ~ "XVI",
+    a10 >= 321 & a10 <= 340 ~ "XVII"))
+
+table(platlapji20$vecumklase)#pārbaudu un ir ok. 
+```
+Turpināšu ar tiem mežiem, kuriem vecumklases intervāls ir 10 gadi. 
+
+```{r platlapju10Vecumklases, cache=TRUE}
+platlapji10= platlapji %>% filter(s10 == "12"|s10== "25")
+max(platlapji10$a10)# vecākais mežs ir 225 gadus vecs, tātad vajag XXIII vecumklases. 
+platlapji10= platlapji10 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 10  ~ "I",
+    a10 >= 11 & a10 <= 20  ~ "II",
+    a10 >= 21 & a10 <= 30  ~ "III",
+    a10 >= 31 & a10 <= 40  ~ "IV",
+    a10 >= 41 & a10 <= 50 ~ "V",
+    a10 >= 51 & a10 <= 60 ~ "VI",
+    a10 >= 61 & a10 <= 70  ~ "VII",
+    a10 >= 71 & a10 <= 80  ~ "VIII",
+    a10 >= 81 & a10 <= 90  ~ "IX",
+    a10 >= 91 & a10 <= 100 ~ "X",
+    a10 >= 101 & a10 <= 110 ~ "XI",
+    a10 >= 111 & a10 <= 120  ~ "XII",
+    a10 >= 121 & a10 <= 130  ~ "XIII",
+    a10 >= 131 & a10 <= 140  ~ "XIV",
+    a10 >= 141 & a10 <= 150 ~ "XV",
+    a10 >= 151 & a10 <= 160 ~ "XVI",
+    a10 >= 161 & a10 <= 170  ~ "XVII",
+    a10 >= 171 & a10 <= 180  ~ "XVIII",
+    a10 >= 181 & a10 <= 190  ~ "XIX",
+    a10 >= 191 & a10 <= 200  ~ "XX",
+    a10 >= 201 & a10 <= 210  ~ "XXI",
+    a10 >= 211 & a10 <= 220  ~ "XXII",
+    a10 >= 221 & a10 <= 230  ~ "XXIII"))
+
+table(platlapji10$vecumklase)#pārbaudu un ir ok. 
+```
+
+Turpinu ar pēdējo atlasi - mežiem, kam vecumklases intervāls ir 5 gadi. 
+
+```{r platlapju5Vecumklases, cache=TRUE}
+platlapji5= platlapji %>% filter(s10 == "32"|s10== "35")
+max(platlapji5$a10)# vecākais mežs ir 56 gadus vecs, tātad vajag 12 vecumklases. 
+platlapji5= platlapji5 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 5  ~ "I",
+    a10 >= 6 & a10 <= 10  ~ "II",
+    a10 >= 11 & a10 <= 15  ~ "III",
+    a10 >= 16 & a10 <= 20  ~ "IV",
+    a10 >= 21 & a10 <= 25 ~ "V",
+    a10 >= 26 & a10 <= 30 ~ "VI",
+    a10 >= 31 & a10 <= 35  ~ "VII",
+    a10 >= 36 & a10 <= 40  ~ "VIII",
+    a10 >= 41 & a10 <= 45  ~ "IX",
+    a10 >= 46 & a10 <= 50 ~ "X",
+    a10 >= 51 & a10 <= 55 ~ "XI",
+    a10 >= 56 & a10 <= 60  ~ "XII"
+    ))
+
+table(platlapji5$vecumklase) 
+```
+visa šī klasificēšana dēļ 6 poligoniem, bet nu labi.
+
+Tagad salīmēšu atpakaļ kopā un pārbaudīšu, un rēķināšos, ka šoreiz pazaudēšu to vienu akāciju mežaudzi, jo nevarēju atrast akāciju vecumklašu intervālu. Kopējam objektu skaitam pēc salīmēšanas tāpēc jābūt 4095.
+
+```{r platlapjiSalim, cache=TRUE, results='hide', echo=TRUE}
+platlapji2 <- bind_rows(platlapji5, platlapji10, platlapji20)
+str(platlapji2)#objektu skaits pareizs
+sort(unique(st_is_valid(platlapji2)))#ģeometrijas pareizas
+rm(platlapji5, platlapji10, platlapji20)
+```
+
+Ieviešu vecumgrupas kā ieprekš:
+```{r platlapjiVecumgrupas, cache=TRUE}
+platlapji2 <- platlapji2 %>%
+  mutate(vecumgrupa = case_when(
+    # ozoli, ciršanas vecums 101, vecumklases intervāls 20 
+    s10 %in% c("10", "61") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("10", "61") & vecumklase %in% c("III", "IV") ~ "2",
+    s10 %in% c("10", "61") & vecumklase == "V"  ~ "3",
+    s10 %in% c("10", "61") & vecumklase %in% c("VI", "VI") ~ "4",
+    s10 %in% c("10", "61")  ~ "5", 
+    
+    # osis, goba, vīksna, kļavas, egle, ciršanas vecums 81, vecumklases intervāls 20
+    s10 %in% c("11", "16", "24", "3", "63") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("11", "16", "24", "3", "63") & vecumklase == "III" ~ "2",
+    s10 %in% c("11", "16", "24", "3", "63") & vecumklase == "IV"  ~ "3",
+    s10 %in% c("11", "16", "24", "3", "63") & vecumklase %in% c("V", "VI")  ~ "4",
+    s10 %in% c("11", "16", "24", "3", "63")  ~ "5", 
+    
+    # liepa, ciršanas vecums 81, vecumklases intervāls 10
+    s10 %in% "12" & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% "12" & vecumklase == c("III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI") ~ "2",
+    s10 %in% "12" & vecumklase == "XII"  ~ "3",
+    s10 %in% "12" & vecumklase %in% c("XIII", "IX")  ~ "4",
+    s10 %in% "12"  ~ "5",
+
+    # pārējie lai ir NA, paliks neklasificētas, jo tām meža likums nav noteicis ciršanas vecumu (dižskabārdis, ķirši, pīlādži, ievas, akācijas, kas palika aiz borta jau iepriekš, zirgkastaņas).
+    TRUE ~ NA_character_
+  ))
+
+#pārbaudu struktūru
+str(platlapji2$vecumgrupa)  # chr
+
+#apskatu poligonu skaitu katrā vecumgrupā
+table(platlapji2$vecumgrupa, useNA = "ifany")
+```
+Šīs te 16 neklasificētās (NA) mežaudzes tā arī paliks, jo tām meža likums nav noteicis ciršanas vecumu (dižskabārdis, ķirši, pīlādži, ievas, akācijas, kas palika aiz borta jau iepriekš, zirgkastaņas). 
+
+Tālāk atkal veicu klases otrās vērtības aizvietošanu ar vecumgrupu, paredzot, ka ja ir NA, tad lai paliek klase 202.
+
+```{r platl202aizv, cache=TRUE}
+str(platlapji2$klase) #klase ir numeric
+platlapji2$klase=as.character(platlapji2$klase)#pārvēršu par chr
+
+#veicu aizvietošanu, paredzot, ka ja ir NA, tad lai paliek klase 202
+platlapji2 <- platlapji2 %>%
+  mutate(klase = ifelse(
+    is.na(vecumgrupa), 
+    klase,
+    paste0(substr(klase, 1, 1), as.character(vecumgrupa), substr(klase, 3, 3))
+  ))
+
+#apskatu, kas sanācis
+table(platlapji2$klase)
+```
+Nevarētu teikt, ka Latvijā platlapju kohorta ir ilgtspējīga.
+
+Atlasu, rasterizēju un saglabāju slāņus, kas tika klasificēti. 
+```{r platlRasterCikls, cache= TRUE, warning=FALSE}
+for (klase_value in unique(platlapji2$klase)) {
+  subset_sf <- platlapji2[platlapji2$klase == klase_value, ]
+  subset_sf$rastr_value <- as.numeric(klase_value)
+  
+  rastrs <- fasterize(subset_sf, ref_rastrs10m, field = "rastr_value", background=0)
+  rastrs[is.na(ref_rastrs10m)] = NA
+  
+  filename <- paste0("klase", klase_value, ".tif")
+  writeRaster(rastrs, filename, overwrite = TRUE)
+}
+
+rm(platlapji, platlapji2, rastrs, subset_sf)
+```
+
+## Jauktu koku meži
+Visbeidzot atkārtoju to visu, bez īpašiem komentāriem, ar jauktu koku mežiem. 
+Jau paredzu, ka varētu sanākt daudz neklasificēto mežu. 
+
+```{r jauktiSugas, cache=TRUE}
+jaukti=st_read_parquet("jaukti_mezi.parquet")
+table(jaukti$s10)
+```
+Kā jau sagaidāms, ļoti daudz dažādu valdošo sugu. 
+
+Izveidoju atlases un izveidoju vecumklases vienu pēc otras.
+
+Sākšu ar vecumaklases intervālu 20 gadi.
+```{r jaukti20Vecumklases, cache=TRUE}
+jaukti20= jaukti %>% filter(s10 == "1"|s10 == "10"|s10 == "11"|s10 == "13"|s10 == "14"|s10 == "15"|s10 == "16"|s10 == "17"|s10 == "22"|s10 == "23"|s10 == "24"|s10 == "3"|s10 == "61"|s10 == "63")
+
+max(jaukti20$a10)# vecākais mežs ir 314 gadus vecs, tātad vajag XVI vecumklases 
+jaukti20= jaukti20 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 20  ~ "I",
+    a10 >= 21 & a10 <= 40  ~ "II",
+    a10 >= 41 & a10 <= 60  ~ "III",
+    a10 >= 61 & a10 <= 80  ~ "IV",
+    a10 >= 81 & a10 <= 100 ~ "V",
+    a10 >= 101 & a10 <= 120 ~ "VI",
+    a10 >= 121 & a10 <= 140 ~ "VII",
+    a10 >= 141 & a10 <= 160 ~ "VIII",
+    a10 >= 161 & a10 <= 180 ~ "IX",
+    a10 >= 181 & a10 <= 200 ~ "X",
+    a10 >= 201 & a10 <= 220 ~ "XI",
+    a10 >= 221 & a10 <= 240 ~ "XII",
+    a10 >= 241 & a10 <= 260 ~ "XIII",
+    a10 >= 261 & a10 <= 280 ~ "XIV",
+    a10 >= 281 & a10 <= 300 ~ "XV",
+    a10 >= 301 & a10 <= 320 ~ "XVI"))
+
+table(jaukti20$vecumklase)#pārbaudu un ir ok. 
+```
+Turpināšu ar tiem mežiem, kuriem vecumklases intervāls ir 10 gadi. 
+
+```{r jaukti10Vecumklases, cache=TRUE}
+jaukti10= jaukti %>% filter(s10 == "12"|s10== "19"|s10== "25"|s10== "4"|s10== "6"|s10== "8")
+max(jaukti10$a10)# vecākais mežs ir 168 gadus vecs, tātad vajag XVII vecumklases. 
+jaukti10= jaukti10 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 10  ~ "I",
+    a10 >= 11 & a10 <= 20  ~ "II",
+    a10 >= 21 & a10 <= 30  ~ "III",
+    a10 >= 31 & a10 <= 40  ~ "IV",
+    a10 >= 41 & a10 <= 50 ~ "V",
+    a10 >= 51 & a10 <= 60 ~ "VI",
+    a10 >= 61 & a10 <= 70  ~ "VII",
+    a10 >= 71 & a10 <= 80  ~ "VIII",
+    a10 >= 81 & a10 <= 90  ~ "IX",
+    a10 >= 91 & a10 <= 100 ~ "X",
+    a10 >= 101 & a10 <= 110 ~ "XI",
+    a10 >= 111 & a10 <= 120  ~ "XII",
+    a10 >= 121 & a10 <= 130  ~ "XIII",
+    a10 >= 131 & a10 <= 140  ~ "XIV",
+    a10 >= 141 & a10 <= 150 ~ "XV",
+    a10 >= 151 & a10 <= 160 ~ "XVI",
+    a10 >= 161 & a10 <= 170  ~ "XVII"))
+
+table(jaukti10$vecumklase)#pārbaudu un ir ok. 
+```
+
+Turpinu ar pēdējo atlasi - mežiem, kam vecumklases intervāls ir 5 gadi. 
+
+```{r jaukti5Vecumklases, cache=TRUE}
+jaukti5= jaukti %>% filter(s10 == "20"|s10== "21"|s10== "32"|s10== "35"|s10== "9")
+max(jaukti5$a10)# vecākais mežs ir 112 gadus vecs, tātad vajag XXIII vecumklases. 
+jaukti5= jaukti5 %>%
+  mutate(vecumklase = case_when(
+    a10 >= 0  & a10 <= 5  ~ "I",
+    a10 >= 6 & a10 <= 10  ~ "II",
+    a10 >= 11 & a10 <= 15  ~ "III",
+    a10 >= 16 & a10 <= 20  ~ "IV",
+    a10 >= 21 & a10 <= 25 ~ "V",
+    a10 >= 26 & a10 <= 30 ~ "VI",
+    a10 >= 31 & a10 <= 35  ~ "VII",
+    a10 >= 36 & a10 <= 40  ~ "VIII",
+    a10 >= 41 & a10 <= 45  ~ "IX",
+    a10 >= 46 & a10 <= 50 ~ "X",
+    a10 >= 51 & a10 <= 55 ~ "XI",
+    a10 >= 56 & a10 <= 60  ~ "XII",
+    a10 >= 61 & a10 <= 65  ~ "XIII",
+    a10 >= 66 & a10 <= 70  ~ "XIV",
+    a10 >= 71 & a10 <= 75 ~ "XV",
+    a10 >= 76 & a10 <= 80 ~ "XVI",
+    a10 >= 81 & a10 <= 85  ~ "XVII",
+    a10 >= 86 & a10 <= 90  ~ "XVIII",
+    a10 >= 91 & a10 <= 95  ~ "XIX",
+    a10 >= 96 & a10 <= 100 ~ "XX",
+    a10 >= 101 & a10 <= 105 ~ "XXI",
+    a10 >= 106 & a10 <= 110  ~ "XXII",
+    a10 >= 111 & a10 <= 115  ~ "XXIII"))
+
+table(jaukti5$vecumklase)#pārbaudu un ir ok. 
+```
+
+Tagad salīmēšu atpakaļ kopā un pārbaudīšu, vai kopējais objektu skaits sakrīt ar oriģinālo (62807 poligoni).
+
+```{r jauktiSalim, cache=TRUE, echo=TRUE, results='hide'}
+jaukti2 <- bind_rows(jaukti5, jaukti10, jaukti20)
+str(jaukti2)#objektu skaits sakrīt
+sort(unique(st_is_valid(jaukti2)))#ģeometrijas pareizas
+rm(jaukti5, jaukti10, jaukti20)
+```
+
+Ieviešu vecumgrupas kā ieprekš:
+```{r jauktiVecumgrupas, cache=TRUE}
+jaukti2 <- jaukti2 %>%
+  mutate(vecumgrupa = case_when(
+    # ciršanas vecums 101, vecumklases intervāls 20 
+    s10 %in% c("1", "10", "13","14","22","61") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("1", "10", "13","14","22","61") & vecumklase %in% c("III", "IV") ~ "2",
+    s10 %in% c("1", "10", "13","14","22","61") & vecumklase == "V"  ~ "3",
+    s10 %in% c("1", "10", "13","14","22","61") & vecumklase %in% c("VI", "VI") ~ "4",
+    s10 %in% c("1", "10", "13","14","22","61")  ~ "5", 
+    
+    # ciršanas vecums 81, vecumklases intervāls 20
+    s10 %in% c("11", "15", "16","23", "24", "3", "63") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("11", "15", "16","23", "24", "3", "63") & vecumklase == "III" ~ "2",
+    s10 %in% c("11", "15", "16","23", "24", "3", "63") & vecumklase == "IV"  ~ "3",
+    s10 %in% c("11", "15", "16","23", "24", "3", "63") & vecumklase %in% c("V", "VI")  ~ "4",
+    s10 %in% c("11", "15", "16","23", "24", "3", "63")  ~ "5", 
+    
+    # ciršanas vecums 81, vecumklases intervāls 10
+    s10 %in% "12" & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% "12" & vecumklase %in% c("III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI") ~ "2",
+    s10 %in% "12" & vecumklase == "XII"  ~ "3",
+    s10 %in% "12" & vecumklase %in% c("XIII", "IX")  ~ "4",
+    s10 %in% "12"  ~ "5",
+
+    # ciršanas vecums 71, vecumklases intervāls 10
+    s10 %in% c("4", "6") & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% c("4", "6") & vecumklase %in% c("III", "IV", "V", "VI") ~ "2",
+    s10 %in% c("4", "6") & vecumklase == "VII"  ~ "3",
+    s10 %in% c("4", "6") & vecumklase %in% c("VIII", "IX")  ~ "4",
+    s10 %in% c("4", "6")  ~ "5",  
+
+    #ciršanas vecums 41, vecumklases intervāls 10
+    s10 %in% "8" & vecumklase %in% c("I", "II")  ~ "1",
+    s10 %in% "8" & vecumklase == "III" ~ "2",
+    s10 %in% "8" & vecumklase == "IV"  ~ "3",
+    s10 %in% "8" & vecumklase %in% c("V", "VI") ~ "4",
+    s10 %in% "8"  ~ "5", 
+    
+    # pārējie paliks neklasificēti (NA), jo meža likums nav noteicis ciršanas vecumu
+    TRUE ~ NA_character_
+  ))
+
+#pārbaudu struktūru
+str(jaukti2$vecumgrupa)  # chr
+
+#apskatu poligonu skaitu katrā vecumgrupā
+table(jaukti2$vecumgrupa, useNA = "ifany")
+```
+gandrīz 3 tūkstoši neklasificētu poligonu. Kārtējais informācijas zudums, kas iespējams, izriet no manas vēlmes neklasificēt to, kas neklasificējas pēc kaut kādiem esošiem noteikumiem. 
+
+Tālāk atkal veicu klases otrās vērtības aizvietošanu ar vecumgrupu, paredzot, ka ja ir NA, tad lai paliek klase 201.
+
+```{r jaukti201aizv, cache=TRUE}
+str(jaukti2$klase) #klase ir numeric
+jaukti2$klase=as.character(jaukti2$klase)#pārvēršu par chr
+
+#veicu aizvietošanu, paredzot, ka ja ir NA, tad lai paliek klase 202
+jaukti2 <- jaukti2 %>%
+  mutate(klase = ifelse(
+    is.na(vecumgrupa), 
+    klase,
+    paste0(substr(klase, 1, 1), as.character(vecumgrupa), substr(klase, 3, 3))
+  ))
+
+#apskatu, kas sanācis
+table(jaukti2$klase)
+```
+ok.
+
+Atlasu, rasterizēju un saglabāju slāņus, kas tika klasificēti. 
+```{r jauktiRasterCikls, cache= TRUE, warning=FALSE}
+for (klase_value in unique(jaukti2$klase)) {
+  subset_sf <- jaukti2[jaukti2$klase == klase_value, ]
+  subset_sf$rastr_value <- as.numeric(klase_value)
+  
+  rastrs <- fasterize(subset_sf, ref_rastrs10m, field = "rastr_value", background=0)
+  rastrs[is.na(ref_rastrs10m)] = NA
+  
+  filename <- paste0("klase", klase_value, ".tif")
+  writeRaster(rastrs, filename, overwrite = TRUE)
+}
+
+rm(jaukti, jaukti2, rastrs, subset_sf)
+```
+
+# 4. LAD un meža datu apvienošana
+Sākumā es apvienošu visus mežu slāņus (biju plānojusi to darīt pie nākamā punkta reizē ar LAD "klase100", bet lai izpildītu arī 5. un 6. apakšuzdevumus, tad man izdevīgāk ir darīt šādi.)
+
+# Mežu apvienošana
+Ideja:
+1) Ielasu rastrus (TIF faili darba direktorijā, izņemot "klase100.tif")
+2) no katra ielasītā faila nosaukuma iegūstu klases numuru
+3) apvienoju rastrus ar terra:cover
+
+Pēc visādas grozīšanās, balancējot starp nepietiekamu RAMu un neadekvātu laika patēriņu procesiem, izlēmu, ka ielasīšu visus rastrus, un tikai tad laidīšu funkciju. Tas izrādījās praktiskākais risinājums šoreiz. 
+
+Failu ielasīšana:
+```{r mezuFaili, cache=TRUE}
+faili <- list.files(pattern = "\\.tif$", full.names = TRUE)
+faili <- faili[basename(faili) != "klase100.tif"]  # izslēdzu klase100, jo tie ir LAD dati
+
+#klases iegūšana no faila nosaukuma
+failu_info <- data.frame(
+  ceļš = faili,
+  klase = as.numeric(gsub("\\D+", "", basename(faili)))
+)
+
+#sakārtošana secībā pēc klases
+failu_info <- failu_info[order(failu_info$klase), ]
+
+#secīga rastru saraksta izveidošana
+mezu_rastri <- lapply(failu_info$ceļš, rast)
+print(mezu_rastri)
+print(paste("Loaded", length(mezu_rastri), "rasters"))
+```
+Funkcija:
+P.S. ar terra::cover man sanāca, ka uzdevums griezās 7 minūtes, bet apskatot ar plot, redzēju, ka ir tikai 201 klase. Izsecināju, ka terra::cover neaizvieto, ja priekšā jau ir nulles. Tad man sanāca, ka jātaisa šādi:
+```{r mezuFunkcija, cache=TRUE}
+# funkcijas izveide
+mezu_apvienosanas_funkc <- function(raster_list) {
+  apvienotais_rastrs <- raster_list[[1]]
+  
+  for (i in 2:length(raster_list)) {
+  #atrod šūnas, kur vērtības ir lielākas par nulli
+  mask <- raster_list[[i]] != 0
+  # šūnu aizvietošana, kur iepriekšējā solī ir atrastas >0 vērtības
+  apvienotais_rastrs[mask] <- raster_list[[i]][mask]
+  }
+  
+  return(apvienotais_rastrs)
+}
+
+```
+
+Palaižu funkciju uz rastru sarakstu:
+```{r mezuApvienosana, cache=TRUE}
+mezuRastrs <- mezu_apvienosanas_funkc(mezu_rastri)
+```
+Šis prasīja "tikai" 20 minūtes, kas ir liels sasniegums. 
+
+Apskatu, kas sanācis:
+```{r mezuRastrsPlot, cache=TRUE}
+plot(mezuRastrs)
+```
+Ja neskaita, ka leģenda ir kā nepārtraukti variējošam mainīgajam, nevis kategorijas kā gribētos, tad izskatās pareizi: redzams ka vecākie meži ir ap ĶNP, kā tam būtu jābūt, un jaunākie iezīmējas Zemgales dienvidos, kur ir izteikta lauksaimniecība. 
+
+Eksportēju šo rastru.
+```{r mezuRastraEksports, cache=TRUE}
+output_path <- "../Uzd06/mezuRastrs.tif"
+writeRaster(mezuRastrs, output_path, overwrite = TRUE)
+```
+
+# Mežu apvienošana ar LAD
+
+Vispirms tad ielasu LAD rastru, jo mežu rastrs jau ir ielasīts:
+```{r LADielasisana,cache=TRUE}
+LADrastrs=rast("klase100.tif")
+plot(LADrastrs)
+```
+Tagad vienīgi jārēķinās, ka LAD rastrs, kas ir ierobežots līdz Centra virsmežniecības kartes robežām (extent), ir plašāks, kā pati MVR centra virsmežniecība.Līdz ar to iegūtais rezultāts nebūs patiess sakarā ar neklasificētajām šūnām. Ja mēs ielasītu arī blakus esošo virsmežniecību datus, tos pakļautu tādām pašām darbībām, apgrieztu līdz šādam extent, tad mēs iegūtu patieso ainu. 
+
+Lai nu kā, tehniska risinājuma labad, tad veicu šo rastru apvienošanu. Apvienošanai izmantošu šoreiz vienkāršāu risinājumu. Apvienojot, funkcijā kā pirmo norādīšu LAD rastru, un kā otro - mežu rastru. Lai izmantotu terra:merge, vai terra:cover, sākumā ir jāietk vaļā no nullēm (to gribēju darīt ar terra::classify, bet tas nedeva nepieciešamo rezultātu, tāpēc vienkāršāks, jau iepriekš izmantots risinājums, kas strādā un gandrīz tikpat ātri), citādi nenotika aizvietošana, ja LAD ir 0, bet meža datos ir >0. Pēc tam pielikšu nulles atpakaļ apvienotajā rastrā.
+
+```{r LADmeziApvienosana, cache=TRUE}
+dim(LADrastrs)
+dim(mezuRastrs)
+#par cik rastriem nav vienādas dimensijas, apgriežu LAD rastru līdz meža rastram
+LADrastrs_cropped <- crop(LADrastrs, ext(mezuRastrs))
+
+LADrastrs_nav0=LADrastrs_cropped
+values(LADrastrs_nav0)[values(LADrastrs_nav0) == 0] <- NA
+
+mezuRastrs_nav0=mezuRastrs
+values(mezuRastrs_nav0)[values(mezuRastrs_nav0) == 0] <- NA
+
+LADmezi_r <- terra::cover(LADrastrs_nav0, mezuRastrs_nav0)
+plot(LADmezi_r)
+```
+Labi, pārklāšana ir beidzot notikusi veiksmīgi. Tagad tikai jāizveido atpakaļ pārējās sauszemes aizvietošana ar 0 un ārpus Latvijas - ar NA. Pirms tam, drošības pēc saglabāju šo rastru uz diska.
+
+```{r LADmeziSave, cache=TRUE}
+output_path <- "../Uzd06/LAD_un_mezi_nav0.tif"
+writeRaster(LADmezi_r, output_path, overwrite = TRUE)
+```
+```{r refRastrs0, cache=TRUE}
+
+ref_rastrs10m=rast("../Uzd03/ref_rastrs/LV10m_10km.tif")
+ref_rastrs10m_centrs = terra::crop(ref_rastrs10m,LADmezi_r)
+ref_rastrs10m_centrs0 <- subst(ref_rastrs10m_centrs,  from = 1, to = 0)
+plot(ref_rastrs10m_centrs0)
+```
+
+Veicu apvienotā rastra NA vērtību aizvietošanu ar 0 nu references rastra.
+```{r LADmezi0atpakal, cache=TRUE}
+LADmezi_r0 <- cover(LADmezi_r, ref_rastrs10m_centrs0)
+plot(LADmezi_r0)
+```
+
+Man tas ir izdevies. Saglabāju uz diska. 
+
+```{r megaRastrsSave, cache=TRUE}
+output_path <- "../Uzd06/LAD_un_mezi_ar0.tif"
+writeRaster(LADmezi_r0, output_path, overwrite = TRUE)
+
+```
+
+
+# 5. MVR un LAD informācijas pārklāšanās
+Tagad sanāk iet soli uz atpakaļu, jo lai šo noskaidrotu, man vajag atsevišķi apvienotu mežu rastru un LAD rastru, tad abus pārklāt un izskatīt pikseļus, kuros ir gan LAD gan MVR datu vērtības. 
+```{r parklasanas, cache=TRUE}
+mask_LAD <- LADrastrs_cropped > 0 
+mask_mezu <- mezuRastrs > 0
+
+overlap_mask <- mask_LAD & mask_mezu
+global(overlap_mask, sum, na.rm = TRUE)
+```
+LAD un meža datu pārklāšanās ir notikusi 1465 šūnās.
+
+
+# 6. Cik daudz šūnu nav ne meži, ne lauki?
+
+Idejiski, šis ir ļoti vienkārši, un iegūtajam rezultātam būtu jā parāda vietas, kur ir jebkādas citas ainavas klases (- ūdeņus, ceļus, apbūvi utml.). Tomēr ir viena problēma - centra virsmežniecība ir šaurāka teritorija kā telpa, ko aizņem LAD dati (LAD dati ir apgriezti līdz centra virsmežniecības "extent", nevis precīzām robežām). Tāpēc jārēķinās, ka iegūtais rezultāts ir stiprs pārspīlējums. Būtu vai nu jāizdomā, kā tomēr apgriezt šos LAD datus (manuprāt, tas jau būtu jādara atgriežoties atpakaļ 3. uzdevumā un darot to pirms rasterizēšana, tomēr to atverot lasu, ka ar st_intersection sanāca nepareizs rezultāts, tāpēc esmu tam gājusi garām), vai arī jāielasa visi mežu dati šajā "extent". Bet nu šobrīd izmantošu uzdevuma nosacījumu "nav raksturotas šī uzdevuma iepriekšējos punktos", kas ļauj man izmantot to kā attaisnojumu tagad tam nepievērsties.
+
+Tātad tehniski, jānoskaidro, cik liela daļa no sauszemes ir pikseļi ar vērtību 0.
+```{r neklasificetiePikseli, cache=TRUE}
+global(LADmezi_r0 == 0, "sum", na.rm=TRUE)
+```
+
+Neklasificētas ir 151522682 šūnas. Iegūtais rezultāts parāda citas ainavas klases - ūdeņus, ceļus, apbūvi utml, tomēr jārēķinās arī, ka daļā teritorijas vienkārši nav iekļauti dati par mežiem (viss ārpus centra virsmežniecības).
+
+# Nobeigums
+```{r kartibaTiriba, cache=TRUE, warning=FALSE}
+rm(list=ls())
+
+```
+
