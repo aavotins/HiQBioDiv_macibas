@@ -1,0 +1,505 @@
+---
+title: "Uzd08_Zuperka"
+author: "Marks"
+date: "2025-02-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+packages <- c("sf", "rgee", "reticulate", "googleCloudStorageR")
+
+install.packages(setdiff(packages, rownames(installed.packages())))
+
+lapply(packages, library, character.only = TRUE)
+
+rm(packages)
+```
+<br> Ielādēju bbox, palaižu earth engine. Neieliku visas tās komandrindas, kuras vajadzēja lai vispār palaistu google earth engine, sasaistīt to ar drive un Cloud storage. 
+```{r sagatavošanās un bounding box Latvijai}
+#ee_Authenticate()
+ee_Initialize(user = "ndef", gcs = TRUE)
+
+bbox_LV <- st_bbox(st_transform( sfarrow::st_read_parquet("../Uzd03/HiQBioDiv_vector_reference_grids/tikls300_sauzeme.parquet"), crs = 4326)) 
+
+#EE saprotamā valodā bounding box Latvijai
+EE_bbox_LV <- ee$Geometry$Rectangle(
+    coords = c(bbox_LV["xmin"], bbox_LV["ymin"], bbox_LV["xmax"], bbox_LV["ymax"]),
+    proj = "EPSG:4326",
+    geodesic = FALSE)
+```
+<br> Taisu pirmo attēlo bez mākoņu maskas.
+```{r 1.1. bez maskas}
+#Filtrs pēc bounding box un 2024. gada
+filtrs_kolekcija <- ee$ImageCollection("COPERNICUS/S2_HARMONIZED")$
+  filterBounds(EE_bbox_LV)$
+  filterDate("2024-06-01", "2024-06-30")$
+  map(function(img) img$reproject("EPSG:3059", NULL, 10)) 
+
+img <- filtrs_kolekcija$median()
+
+#Intereses pēc manuāli nosaku kur vizualizācijā būs centrālais punkts (Map$centerObject nestrādā, lai nav katru reizi jātin no visas pasaules skata). 
+viduspunkts <- c(x = (bbox_LV["xmin"] + bbox_LV["xmax"]) / 2, 
+              y = (bbox_LV["ymin"] + bbox_LV["ymax"]) / 2)
+
+bez_maskas <- Map$setCenter(lon = as.numeric(viduspunkts["x.xmin"]), lat = as.numeric(viduspunkts["y.ymin"]))
+
+bez_maskas <- Map$addLayer(
+  eeObject = img$select(c("B4", "B3", "B2")),
+  visParams = list(min = 0, max = 4000),
+  name = "COPERNICUS S2 HARMONIZED Latvija BEZ MASKAS"
+)
+```
+<br> Tālāk lietoju mākoņu masku ar Google doto piemēru (pārrakstu R valodā). Nemainu parametrus, kuri bija piemērā. 
+```{r 1.2. ar mākoņu masku (piemēra)}
+cloudMask <- function(img) {
+  qa <- img$select("QA60")
+  cloud_bit_mask <- bitwShiftL(1, 10)
+  cirrus_bit_mask <- bitwShiftL(1, 11)
+   mask <- qa$bitwiseAnd(cloud_bit_mask)$eq(0)$
+      And(qa$bitwiseAnd(cirrus_bit_mask)$eq(0))
+   
+   img$updateMask(mask)$divide(10000)
+}
+
+filtrs_kolekcija <- ee$ImageCollection("COPERNICUS/S2_HARMONIZED")$
+  filterBounds(EE_bbox_LV)$
+  filterDate("2024-06-01", "2024-06-30")$
+  map(function(img) img$reproject("EPSG:3059", NULL, 10))$
+  map(cloudMask)
+
+rgb_vis <- list(
+  min = 0.0,
+  max = 0.3,
+  bands = c("B4", "B3", "B2")
+)
+
+ar_masku <- Map$addLayer(filtrs_kolekcija$median(), 
+                      rgb_vis, 
+                      "Copernicus S2 harm. AR MASKU")
+```
+<br> Tālāk s2cloudless. Tā kā rezultātu ietekmē vairāki mainīgie, kurus jāievada pašam, ērtības labad tos ievietoju atsevišķā R čankā.
+```{r 1.3.1. s2cloudless - mainīgo čanks}
+CLD_PRB_THRESH <- 50 #Nosaka virs kāda Cloud_prob_numerical mākonis tiks uzskatīts par mākoni
+CLD_PRJ_DIST <- 50 #Attālums kurā tiks projicēts mākonis. Strādājam 3059 tāpēc metri. Ar šādu vērtību sanāk daudz maz labs rezultāts 
+NIR_DRK_THRESH <- 300 #Zem kādas NIR vērtības pikselis tiks uzskatīts par tumšu
+BUFFER <- 10 #Bufferis apkārt mākonim
+
+```
+<br> No sākuma uztaisu vienotu kolekciju ar s2harm un s2cloud datiem.
+```{r 1.3.2. s2cloudless - apvienošana ar s2cloud kolekciju}
+#Tālāk filtrēšanu veikšu izmantojot funkciju
+filter_condition <- function(collection) {
+  collection$
+  filterBounds(EE_bbox_LV)$
+  filterDate("2024-06-01", "2024-06-30")$
+  map(function(img) img$reproject("EPSG:3059", NULL, 10))
+  
+}
+
+s2harm_kolekcija <- filter_condition(ee$ImageCollection("COPERNICUS/S2_HARMONIZED"))
+
+ref_makoni <- Map$addLayer(s2harm_kolekcija$median(), 
+                      rgb_vis, 
+                      "S2 HARMONIZED - REFERENCE")
+
+s2cloud_kolekcija <- filter_condition(ee$ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY"))
+
+Join_kolekcija <- ee$Join$saveFirst("s2cloudless")$apply(
+    primary = s2harm_kolekcija,
+    secondary = s2cloud_kolekcija,
+    condition = ee$Filter$equals(
+      leftField = "system:index",
+      rightField = "system:index"))
+```
+
+```{r 1.3.3. s2cloudless - mākoņu ēnas maskas}
+add_cloud_bands <- function(img) {
+  img <- ee$Image(img) 
+  cld_prb <- ee$Image(img$get("s2cloudless"))$rename("Cloud_probability_numerical")
+  is_cloud <- cld_prb$gt(CLD_PRB_THRESH)$rename("Cloud_probability_logical")
+  img$addBands(cld_prb)$addBands(is_cloud)
+}
+
+Join_kolekcija <- Join_kolekcija$map(add_cloud_bands)
+
+#Apskatos kādi slāņi pieejami (vai ir pievienojušies Cloud_prob slāņi)
+first_img <- ee$Image(Join_kolekcija$first())
+bandNames <- first_img$bandNames()
+print(bandNames$getInfo())
+
+S2_SCL_kolekcija <- filter_condition(ee$ImageCollection("COPERNICUS/S2_SR_HARMONIZED"))
+
+add_empty_classif <- function(img) {
+  img <- ee$Image(img)
+  empty_scl <- ee$Image(0)$rename("SCL")
+  img_with_empty_scl <- img$addBands(empty_scl)
+  return(img_with_empty_scl)
+}
+
+Join_kolekcija <- Join_kolekcija$map(add_empty_classif)
+
+Join_kolekcija <- ee$Join$saveFirst("S2_SCL_kolekcija")$apply(
+  primary = Join_kolekcija,
+  secondary = S2_SCL_kolekcija,
+  condition = ee$Filter$equals(
+    leftField = "system:index",
+    rightField = "system:index"
+  )
+)
+
+add_shadow_bands <- function(img) {
+  img <- ee$Image(img)
+  not_water <- ee$Image(img$select("SCL")$neq(6))
+  dark_pixels <- img$select("B8")$
+    lt(NIR_DRK_THRESH)$
+    multiply(not_water)$
+    rename("Dark_pixels")
+  shadow_azimuth <- ee$Number(90)$subtract(ee$Number(img$get("MEAN_SOLAR_AZIMUTH_ANGLE")))
+  cld_proj <- img$select("Cloud_probability_logical")$
+    directionalDistanceTransform(shadow_azimuth, CLD_PRJ_DIST)$
+    reproject(crs = img$select(0)$projection(), scale = 100)$
+    select("distance")$
+    mask()$
+    rename("cloud_transform")
+  shadows <- cld_proj$multiply(dark_pixels)$rename("shadows")
+  img$addBands(dark_pixels)$addBands(cld_proj)$addBands(shadows)
+}
+
+#Gala mākoņu maska
+add_cld_shdw_mask <- function(img) {
+   img <- ee$Image(img)
+   img_cloud <- add_cloud_bands(img)
+   img_cloud_shadow <- add_shadow_bands(img_cloud)
+   is_cld_shdw = img_cloud_shadow$select("Cloud_probability_logical")$
+     add(img_cloud_shadow$select("shadows"))$gt(0)
+   is_cld_shdw <- is_cld_shdw$focalMin(2)$
+      focalMax(BUFFER)$
+      reproject(crs = img$select(0)$projection(), scale = 10)$
+      rename("cloudmask")
+   img$addBands(is_cld_shdw)
+}
+
+Join_kolekcija <- Join_kolekcija$map(add_shadow_bands)$map(add_cld_shdw_mask)
+
+first_img <- ee$Image(Join_kolekcija$first())
+bandNames <- first_img$bandNames()
+print(bandNames$getInfo())
+```
+<br> Join_kolekcija ir EarthEngine FeatureCollection, tādēļ attēlot viņu nevar - jākonvertē.
+```{r 1.3.4. konvertēšana uz ImageCollection}
+band_names <- c("Cloud_probability_numerical", "Cloud_probability_logical", "shadows", "cloudmask", "cloud_transform", "Dark_pixels", "B4", "B3", "B2") #Mani interesējošie slāņi
+
+Join_kolekcija <- ee$FeatureCollection(Join_kolekcija)$map(function(f) {
+  img <- ee$Image(f)
+  img$select(band_names)
+})
+
+Join_kolekcija <- ee$ImageCollection(Join_kolekcija)
+```
+<br> Attēloju.
+```{r 1.3.5. s2cloudless - starprezultāti}
+saraksts <- list()
+
+for (index in 1:length(band_names)) {
+  nosaukums <- band_names[index]
+  
+  if (nosaukums %in% c("Cloud_probability_numerical", "Cloud_probability_logical", "shadows", "cloudmask", "Dark_pixels")) {
+    image <- Join_kolekcija$select(nosaukums)$median()$selfMask()
+  } else {
+    image <- Join_kolekcija$select(nosaukums)$median()
+  }
+  if (!(nosaukums %in% c("B4", "B3", "B2")))
+   {saraksts[[nosaukums]] <- image}
+}
+
+karte <- NULL
+
+#Izmantošu piemērā dotās krāsas
+viz_params <- list(
+  probability = list(min = 0, max = 100),
+  clouds = list(palette = "e056fd"),
+  cloud_transform = list(min = 0, max = 1, palette = c("white", "black")),
+  dark_pixels = list(palette = "orange"),
+  shadows = list(palette = "yellow"),
+  cloudmask = list(palette = "orange")
+)
+
+layer_names <- c("probability", "clouds", "cloud_transform", "dark_pixels", "shadows", "cloudmask")
+
+for (nosaukums in names(saraksts)) {  
+  if (nosaukums %in% layer_names) 
+    image <- saraksts[[nosaukums]]
+    
+    layer <- Map$addLayer(saraksts[[nosaukums]], viz_params[[nosaukums]], nosaukums)
+  invisible(layer)
+    
+    if (is.null(karte)) {
+      karte <- layer
+    } else {
+      karte <- karte + layer 
+    }
+}
+```
+<br> Veidoju gala attēlu bez mākoņiem.
+```{r 1.3.6. s2 cloudless - maskas pielietošana}
+apply_cld_shdw_mask <- function(img) { 
+  not_cld_shdw <- img$select("cloudmask")$Not()
+  mask_img <- img$select(c("B4", "B3", "B2"))$updateMask(not_cld_shdw)
+  return(mask_img)
+}
+
+s2harm_cldless_maska <- Join_kolekcija$map(apply_cld_shdw_mask)
+  
+med_img <- ee$Image(s2harm_cldless_maska$median())
+
+s2cloudless_maska <- Map$addLayer(
+  eeObject = med_img,
+  visParams = list(min = 0, max = 4000, bands = c("B4", "B3", "B2")),
+  name = "S2 HARMONIZED AR S2CLOUDLESS MASKU"
+)
+
+karte <- bez_maskas + ar_masku + s2cloudless_maska
+```
+<br> Rezultāti: 
+<br> 1) bez maskas satelītuzņēmumu mozaīka nav izmantojama - gandrīz vai pilnīgi viss noklāts ar mākoņiem; 
+<br> 2) Otrais variants - jau ir daudz labāk, bet mākoņu tāpat ir diezgan daudz, un atsevišķas vietas ir pilnīgi nosegtas;
+<br> 3) Trešais variants - vislabākais - mākoņu procentuālais segums ir vismazākais, bet dažās vietās nezinu kādēļ man ir saglabājušās baltās kontūras un daži pelēki plankumi kuri netika noņemti;
+<br> Atšķirība ir starp pieeju kā mākoņi tiek noņemti - otrais variants balstās uz QA60 joslu, kurā ir nokodēti 2 mākoņu tipi - opaque (zemie) un cirrus (augstie) mākoņi. Pieeja tehniski ir vienkāršāka un ātrāka, bet vienlaikus nespēj tikt galā ar "izlecējiem" - mākoņiem kas neatbilst šīm divām definīcijām (piem. ļoti plāni, vai mākoņu ēnas). Trešā pieeja ir ļoti sarežģīta - no sākuma jāuztaisa slānis ar mākoņu iespejamību, tad jāuztaisa mākoņu ēna + vairāki starpslāņi (cloud_transform, dark_pixels). Rezultāts ir daudz labāks, bet arī ilgāk izpildāms un grūtāk saprotams. Kopumā atšķiras, jo pirmā versija ir nefiltrēts attēls, otrs ir primitīvi filtrēts, trešais ir advancēti filtrēts. 
+<br><br> Nākamajā uzdevumā izveidoju masku vēlreiz, tikai pārrakstu visu vienā čankā un funkciju veidā (1. uzd. pildīju februāra beigās, tādēļ vienlaicīgi atgādinājumam kas tika darīts)
+```{r 2.1. sagatavošanās - maskas izveidošana 2018-2024 mediānai}
+rm(list = setdiff(ls(), "EE_bbox_LV"))
+gc()
+
+CLD_PRB_THRESH <- 50
+CLD_PRJ_DIST <- 50
+NIR_DRK_THRESH <- 300
+BUFFER <- 10
+
+# 1) Filtrs un pārprojicēšana
+filter_condition <- function(collection, bbox, start_date, end_date, start_month, end_month) {
+  collection$
+    filterBounds(bbox)$
+    filterDate(start_date, end_date)$
+    filter(ee$Filter$calendarRange(start_month, end_month, "month"))$
+    map(function(img) img$reproject("EPSG:3059", NULL, 10))
+}
+s2harm <- filter_condition(ee$ImageCollection("COPERNICUS/S2_HARMONIZED"), EE_bbox_LV, "2018-05-01", "2024-08-31", 5, 8)
+s2cloud <- filter_condition(ee$ImageCollection("COPERNICUS/S2_CLOUD_PROBABILITY"), EE_bbox_LV, "2018-05-01", "2024-08-31", 5, 8)
+
+# 2) Savietot s2 harm un s2 cloud prob kolekcijas
+join_collections <- function(s2harm, s2cloud) {
+  Join_kolekcija <- ee$Join$saveFirst("s2cloudless")$apply(
+    primary = s2harm,
+    secondary = s2cloud,
+    condition = ee$Filter$equals(
+      leftField = "system:index",
+      rightField = "system:index"))
+  return(Join_kolekcija)
+}
+Join_kolekcija <- join_collections(s2harm, s2cloud)
+rm(s2cloud, s2harm)
+
+# 3) Pielikt mākoņu varbūtības datus +
+add_cloud_bands <- function(img) {
+  img <- ee$Image(img)
+  cld_prb <- ee$Image(img$get("s2cloudless"))$rename("Cloud_probability_numerical")
+  is_cloud <- cld_prb$gt(CLD_PRB_THRESH)$rename("Cloud_probability_logical")
+  img$addBands(cld_prb)$addBands(is_cloud)
+}
+Join_kolekcija <- Join_kolekcija$map(add_cloud_bands)
+
+# 4) Uztaisīt tukšu SCL band+
+add_empty_classif <- function(img) {
+  img <- ee$Image(img)
+  empty_scl <- ee$Image(0)$rename("SCL")
+  img$addBands(empty_scl)
+}
+join_scl <- function(joined_kolekcija, bbox, start_date, end_date, start_month, end_month) {
+  scl_col <- filter_condition(ee$ImageCollection("COPERNICUS/S2_SR_HARMONIZED"), bbox, start_date, end_date, start_month, end_month)
+  joined_kolekcija <- joined_kolekcija$map(add_empty_classif)
+  ee$Join$saveFirst("S2_SCL_kolekcija")$apply(
+    primary = joined_kolekcija,
+    secondary = scl_col,
+    condition = ee$Filter$equals(
+    leftField = "system:index",
+    rightField = "system:index"
+  ))
+}
+Join_kolekcija <- join_scl(Join_kolekcija, EE_bbox_LV, "2018-05-01", "2024-08-31", 5, 8)
+
+# 5) Pielikt ēnas joslas+
+add_shadow_bands <- function(img) {
+  img <- ee$Image(img)
+  not_water <- img$select("SCL")$neq(6)
+  dark_pixels <- img$select("B8")$lt(NIR_DRK_THRESH)$multiply(not_water)$rename("Dark_pixels")
+  shadow_azimuth <- ee$Number(90)$subtract(ee$Number(img$get("MEAN_SOLAR_AZIMUTH_ANGLE")))
+  cld_proj <- img$select("Cloud_probability_logical")$
+    directionalDistanceTransform(shadow_azimuth, CLD_PRJ_DIST)$
+    reproject(crs = img$select(0)$projection(), scale = 100)$
+    select("distance")$mask()$rename("cloud_transform")
+  shadows <- cld_proj$multiply(dark_pixels)$rename("shadows")
+  img$addBands(dark_pixels)$addBands(cld_proj)$addBands(shadows)
+}
+Join_kolekcija <- Join_kolekcija$map(add_shadow_bands)
+
+# 6) Uztaisīt gala mākoņu masku+
+add_cld_shdw_mask <- function(img) {
+  img <- ee$Image(img)
+  img_cloud <- add_cloud_bands(img)
+  img_cloud_shadow <- add_shadow_bands(img_cloud)
+  is_cld_shdw <- img_cloud_shadow$select("Cloud_probability_logical")$
+    add(img_cloud_shadow$select("shadows"))$gt(0)$
+    focalMin(2)$focalMax(BUFFER)$
+    reproject(crs = img$select(0)$projection(), scale = 10)$
+    rename("cloudmask")
+  img$addBands(is_cld_shdw)
+}
+Join_kolekcija <- Join_kolekcija$map(add_cld_shdw_mask)
+
+# 7) Konvertācija no FeatCol uz ImageCol+
+convert_to_image_collection <- function(fc) {
+  fc <- ee$FeatureCollection(fc)$map(function(f) {
+    ee$Image(f)$select(c("Cloud_probability_numerical", "Cloud_probability_logical", "shadows", "cloudmask", "cloud_transform", "Dark_pixels", "B8", "B4", "B3", "B2")) #B8 vajag NDVI nākamajā punktā
+  })
+  ee$ImageCollection(fc)
+}
+Join_kolekcija <- convert_to_image_collection(Join_kolekcija) 
+
+# 8) Pielietot cloud shadow mask
+apply_cld_shdw_mask_final <- function(img) {
+  not_cld_shdw <- img$select("cloudmask")$Not()
+  img$select(c("B8", "B4", "B3", "B2"))$updateMask(not_cld_shdw) #B8 nākamajam uzd. 
+}
+Join_kolekcija <- Join_kolekcija$map(apply_cld_shdw_mask_final)
+
+attels_base <- ee$Image(Join_kolekcija$median())
+```
+<br>Map man negrib attēlot, tādēļ konvertēšu nelielu daļu uz rast (tikai paskatīties vai attēls ir un tā ir tikai leaflet problēma attēlot visu). Viss ok, bet atstāju šo.
+```{r 2.1. sagatavošanās - lejupielādēju nelielu rezultātu (pārbaudei ārpus leaflet), include=FALSE}
+#Šo darīšu arī turpmāk, tādēļ pārveidoju uz funkciju
+saglabat_attelu_R <- function(attels) {
+test <- ee_as_rast(
+  image = attels,
+  region = ee$Geometry$Point(c(25.2799, 56.8796))$buffer(1000)$bounds(), #Ap nejaušu punktu LV uztaisu 1km buferi
+  scale = 10, #Izšķirtspēja
+  via = "gcs",
+  lazy = TRUE) #Pārbaudu izpildi
+}
+sentinel_base2 <- saglabat_attelu_R(attels_base)
+
+terra::plotRGB(test, r = 1, g = 2, b = 3, stretch = "lin")
+```
+<br> NDVI aprēķināšana visu gadu mediānai.
+```{r 2.1 NDVI 2018-2024 vērtību mediānai}
+nir <- attels_base$select("B8")
+red <- attels_base$select("B4")
+ndvi <- nir$subtract(red)$divide(nir$add(red))$rename("NDVI")
+
+Map$addLayer(eeObject = ndvi,
+  visParams = list(
+    min = -1,
+    max = 1, #NDVI diapazons ir no -1 līdz 1
+    palette = c("brown", "yellow", "green"),
+    "NDVI"))
+
+```
+<br> Un atkal leaflet negrib lādēt slāni iekšā - lejupielādēju lokāli un saglabāju salīdzināšanai nelielu teritoriju. Iepriekšējais 1x1 km kvadrāts gatavojās 10 min.
+```{r 2.1. pārbaudu ārpus leaflet NDVI 1. varianta rezultātus}
+#ndvi_image <- saglabat_attelu_R(ndvi)
+#terra::plot(ndvi_image)
+```
+<br> Vērtības ir. Taisu nākamo. Idejiski - iegūstu NDVI katram attēlam kolekcijas iekšienē un tad gala attēlu izvelku no mediānu mediānas (nevis izvelku mediānu 8tās, 5tās, 4tās un 3ās joslas vērtībām vienā attēlā un tad tām saskaitu NDVI).
+```{r 2.2. NDVI 2018-2024 katram attēlam atsevišķi un to mediāna}
+calculate_NDVI_every_img <- function(kolekcija) {
+  kolekcija$map(function(att) { #Pielietoju funkciju katram attēlam kolekcijā
+    nir <- att$select("B8")
+    red <- att$select("B4")
+    ndvi <- nir$subtract(red)$divide(nir$add(red))$rename("NDVI")
+    att$addBands(ndvi)
+  })
+}
+NDVI_collection <- calculate_NDVI_every_img(Join_kolekcija)$select("NDVI")
+
+NDVI_collection$first()$bandNames()$getInfo() #Pārbaudu vai ir pareizais band
+
+NDVI_attels <- ee$Image(NDVI_collection$median())
+
+#NDVI_medians_rast <- saglabat_attelu_R(NDVI_attels)
+#terra::plot(NDVI_medians_rast - ndvi_image)
+```
+<br> Dīvaini, bet vismaz šajā teritorijā vērtības ir vienādas, tāpat kā pirmajā gadījumā.
+<br> 2.3. - saskaitļošu NDVI mediānu katram gadam un izvilkšu gala rezultātu pēc gadu mediānām.
+```{r 2.3. NDVI 2018-2024 katram attēlam, tad katram gadam atsevišķi un to mediāna}
+gadi <- 2018:2024
+#Primitīvāka pieeja ar for ciklu, bet nu strādā
+medianas_atseviski <- list()
+
+for (gads in seq_along(gadi)) {
+  gads_cipars <- gadi[[gads]]
+  start_date <- paste0(gads_cipars, "-01-01")
+  end_date <- paste0(gads_cipars, "-12-31") #NDVI kolekcijā jau ir izfiltrēti dati pēc vajadzīgajiem laika kritērijiem, tādēļ var rakstīt arī visus gada datumus
+  dati_n_gadam <- NDVI_collection$filterDate(start_date, end_date)
+  cat(gads_cipars,". gadā ir", dati_n_gadam$size()$getInfo(), "attēli\n") #Šis ir pārbaudei lai zinu ka atlasīja attēlus pareizi
+  
+  mediana <- ee$Image(dati_n_gadam$median())
+  mediana <- mediana$set("year", gads_cipars) #Pievienoju gadu drošībai
+  medianas_atseviski[[gads]] <- mediana
+}
+
+medianas_atseviski <- ee$List(medianas_atseviski)
+medianas_atseviski <- ee$ImageCollection$fromImages(medianas_atseviski)
+
+#Pārbaudu vai gadi ir korekti pievienojušies
+ee$Image(medianas_atseviski$toList(
+  medianas_atseviski$size()$getInfo()) #Šis izprintēs cik daudz attēlu ir kolekcijā - labāk nekā manuāli uzrakstīt 
+  $get(2))$get("year")$getInfo() #Indeksi ir ar nobīdi: 0 - pirmais attēls, 1 - otrais, 2 - trešais, u.t.t. 
+
+NDVI_yearly_median <- ee$Image(medianas_atseviski$median())
+
+#NDVI_yearly_medians_rast <- saglabat_attelu_R(NDVI_yearly_median)
+#terra::plot(NDVI_yearly_medians_rast - ndvi_image)
+```
+<br> Un atkal - šajā testa teritorijā starpība ir 0 ar iepriekšējiem variantiem. Lejupielādēju visu Latvijas teritoriju.
+```{r 3.1 lejupielādēju NDVI rastru uz sava datora}
+LV_yearly_NDVI_10m <- ee_as_rast(
+  image = NDVI_yearly_median,
+  region = EE_bbox_LV,  #Tehniski attēlam jau jābūt ir tikai šajā teritorijā, bet drošībai lai ir
+  scale = 10,
+  maxPixels = 1e10, #Pietiktu 1e9, bet neliels buferis
+  via = "gcs", #Drive ir pilns
+  container = "hiqbiodiv_macibas_8uzd_marks")
+```
+<br> Lejupielādes process aizņēma 33 200 sekundes jeb nedaudz vairāk par 9 stundām. Pašās beigās izmeta kļūdu "subscript out of bounds" un R vidē objektu neielika (ee_as_rast vajadzētu automātiski ielādēt uz datora temporary file un ielasīt R vidē kā SpatRast objektu). 
+<br> Cloud storage diskā ir 3 faili, kopā 8 GB. Bounding box sadalīja 3 daļās un katru lejupielādēja atsevišķi. Apskatījos QGIS - izskatās labi. Tos lejupielādēju uz sava datora un izdaru atlikušo daļu.
+```{r 3.2.1. apvienoju Cloud storage lejupielādētos datus, include=FALSE}
+library(terra)
+library(sfarrow)
+library(exactextractr)
+library(raster)
+
+NDVI_rastri <- list.files(".\\Uzd08", pattern = ".tif", full.names = TRUE)
+ref_rastrs <- rast(".\\Uzd03\\HiQBioDiv_raster_reference_grids\\LV10m_10km.tif")
+
+for (rastrs in seq_along(NDVI_rastri)) {
+  assign(paste0(rastrs), rast(NDVI_rastri[rastrs]), envir = .GlobalEnv)
+}
+
+Latvia_4326_NDVI <- merge(`1`,`2`,`3`)
+rm(NDVI_rastri, `1`,`2`,`3`, rastrs)
+gc()
+
+Latvia_3059_NDVI <- project(Latvia_4326_NDVI, ref_rastrs)
+Latvia_3059_NDVI <- mask(Latvia_3059_NDVI, ref_rastrs) #Nenostrādātu ja nebūtu vienāds extent, izšķirtspēja un novietojums
+writeRaster(Latvia_3059_NDVI, "./Uzd08/NDVI_10m_2018-2024_yearly_median.tif", progress=1, overwrite=TRUE)
+```
+<br> Taisu IQR slāni.
+```{r 3.2.2. NDVI IQR}
+Latvia_3059_NDVI <- rast("./Uzd08/NDVI_10m_2018-2024_yearly_median.tif")
+ref_100m <- st_read_parquet("./Uzd03/HiQBioDiv_vector_reference_grids/tikls100_sauzeme.parquet")
+
+NDVI_IQR_100m <- exact_extract(Latvia_3059_NDVI, ref_100m, fun = function(x) IQR(x$value, na.rm = TRUE), summarize_df=TRUE) 
+ref_100m$NDVI_IQR <- NDVI_IQR_100m
+
+NDVI_IQR_100m_rastrs <- fasterize(ref_100m, raster("./Uzd03/HiQBioDiv_raster_reference_grids/LV100m_10km.tif"), field = "NDVI_IQR")
+writeRaster(NDVI_IQR_100m_rastrs, "./Uzd08/NDVI_IQR_100m.tif")
+```
