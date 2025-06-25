@@ -1,0 +1,512 @@
+---
+title: "Uzd_06"
+author: "Raitis Riters"
+date: "2025-06-22"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Uzdevuma izpildei bija nepieciešamas šādas pakotnes:
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(terra)
+library(sf)
+library(arrow)
+library(sfarrow)
+library(fasterize)
+```
+
+## 1. solis.
+
+Nezinu vai iepriekšējais rastrs ir korekts, tādēļ mēģināšu uztaisīt jaunu rastru ar labākām zināšanām.
+```{r}
+ladparquet<- arrow::read_parquet("../Uzd03/lauki.parquet")
+ladparquet<- st_as_sf(ladparquet)
+ladparquet$lauks=100
+ladparquet <- ladparquet %>% select(lauks)
+rastrs10m<- terra::rast("../Uzd03/rastrs/LV10m_10km.tif")
+ladrastrs<- terra::rasterize(ladparquet, rastrs10m, field="lauks", touches=FALSE, background=NA)
+ladrastrs <- terra::crop(ladrastrs, ladparquet)
+writeRaster(ladrastrs, "ladrastrs.tif", overwrite = TRUE)
+```
+
+##2. solis.
+Ielasām meža datus. 
+```{r}
+mezi_kopa<-read_parquet("../Uzd03/centrs_geoparquet.parquet")
+```
+Skujoki- Pinaceae dzimtai piederīgie
+Šaurlapji- Bērzi, alkšņi, vītoli un kārkli.
+Platlapji- Visi pārējie.
+```{r}
+skujkoki<- c(1, 3, 13, 14, 15, 22, 28, 29)
+saurlapji<- c(4, 6, 8, 9, 19, 20, 68)
+platlapji<- c(8, 9, 10, 11, 12, 16, 17, 18, 21, 24, 25, 26, 27, 32, 35, 50, 61, 62, 63, 64, 65, 66, 67, 69)
+```
+
+Šeit tiek aprēķināta koku tipu proporcija pret pārējiem.
+```{r, cache=TRUE}
+koki4<-mezi_kopa %>% rename(sugas1=s10, skers1=g10, sugas2=s11, skers2=g11, sugas3=s12, skers3=g12, sugas4=s13, skers4=g13, sugas5=s14, skers5=g14) #šis nav obligāti, bet gan lai pašam vieglāk strādāt
+
+#nākamās rindiņas saskaita šķērsgriezumus pa koku tipiem kopā.  
+koki4 <- koki4 %>% 
+      mutate (skujkoki = 
+                ifelse(sugas1 %in% skujkoki, skers1, 0)+
+                ifelse(sugas2 %in% skujkoki, skers2, 0)+
+                ifelse(sugas3 %in% skujkoki, skers3, 0)+
+                ifelse(sugas4 %in% skujkoki, skers4, 0)+
+                ifelse(sugas5 %in% skujkoki, skers5, 0))
+koki4 <- koki4 %>% 
+      mutate (platlapji = 
+                ifelse(sugas1 %in% platlapji, skers1, 0)+
+                ifelse(sugas2 %in% platlapji, skers2, 0)+
+                ifelse(sugas3 %in% platlapji, skers3, 0)+
+                ifelse(sugas4 %in% platlapji, skers4, 0)+
+                ifelse(sugas5 %in% platlapji, skers5, 0))
+koki4 <- koki4 %>% 
+      mutate (saurlapji = 
+                ifelse(sugas1 %in% saurlapji, skers1, 0)+
+                ifelse(sugas2 %in% saurlapji, skers2, 0)+
+                ifelse(sugas3 %in% saurlapji, skers3, 0)+
+                ifelse(sugas4 %in% saurlapji, skers4, 0)+
+                ifelse(sugas5 %in% saurlapji, skers5, 0))
+
+#Nākamās rindiņas aprēķina proporcijas starp koku tipiem.
+koki4 <- koki4 %>%
+  rowwise() %>%
+  mutate(
+    prop_skujkoki = skujkoki / sum(c_across(c(skujkoki, saurlapji, platlapji)))
+  ) %>%
+  ungroup()
+
+koki4 <- koki4 %>%
+      rowwise() %>%
+      mutate(
+        prop_platlapji = platlapji / sum(c_across(c(skujkoki, saurlapji, platlapji)))
+      ) %>%
+      ungroup()
+
+koki4 <- koki4 %>%
+      rowwise() %>%
+      mutate(
+        prop_saurlapji = saurlapji / sum(c_across(c(skujkoki, saurlapji, platlapji)))
+      ) %>%
+      ungroup()  
+    
+
+#Nomainu NaN vērtības uz 0, lai vieglāk domāt.
+koki4$prop_skujkoki[is.nan(koki4$prop_skujkoki) | 
+                           is.na(koki4$prop_skujkoki) | 
+                           is.infinite(koki4$prop_skujkoki)] <- 0
+koki4$prop_platlapji[is.nan(koki4$prop_platlapji) |
+                           is.na(koki4$prop_platlapji) |
+                           is.infinite(koki4$prop_platlapji)] <- 0
+koki4$prop_saurlapji[is.nan(koki4$prop_saurlapji) |
+                           is.na(koki4$prop_saurlapji) |
+                           is.infinite(koki4$prop_saurlapji)] <- 0
+```
+
+Izfiltrēju atsevišķos objektos mežaudzes, kurās pārsvarā (proporcija >=75% koka tipa) ir tikai viens koku tips.
+Savukārt, ja neviens koku tips nesasniedz 75%, taču mežaudzē ir koki, tad tie tika uzskatīti par jauktiem. 
+Apvienotajos meža datos ir arī kokaudzes bez kokiem, bet tās netika ņemtas vērā. 
+```{r, cache=TRUE}
+mezi_skujkoku<-koki4 %>% filter(prop_skujkoki>=0.75)
+mezi_saurlapju<-koki4 %>% filter(prop_saurlapji>=0.75)
+mezi_platlapju<-koki4 %>% filter(prop_platlapji>=0.75)
+mezi_jaukti <-koki4 %>% filter(prop_skujkoki<0.75 & prop_skujkoki>0 & prop_saurlapji<0.75 & prop_saurlapji>0 & prop_platlapji<0.75 & prop_platlapji>0) 
+```
+Izveidojiet rastra slāņus ar skujkoku (klase “204”), šaurlapju (klase “203”), platlapju (klase “202”) un jauktu koku mežiem (klase “201”) no sevis ierosinātās klasifikācijas otrajā uzdevumā.
+
+```{r}
+mezi_skujkoku<-st_as_sf(mezi_skujkoku)
+skujkoku_rastrs<-rasterize(mezi_skujkoku, rastrs10m, field=204, touches=FALSE)
+skujkoku_rastrs<-crop(skujkoku_rastrs, mezi_skujkoku)
+
+mezi_saurlapju<-st_as_sf(mezi_saurlapju)
+saurlapju_rastrs<-rasterize(mezi_saurlapju, rastrs10m, field=203, touches=FALSE)
+saurlapju_rastrs<-crop(saurlapju_rastrs, mezi_saurlapju)
+
+mezi_platlapju<-st_as_sf(mezi_platlapju)
+platlapju_rastrs<-rasterize(mezi_platlapju, rastrs10m, field=202, touches=FALSE)
+platlapju_rastrs<-crop(platlapju_rastrs, mezi_platlapju)
+
+mezi_jaukti<-st_as_sf(mezi_jaukti)
+jaukti_rastrs<-rasterize(mezi_jaukti, rastrs10m, field=201, touches=FALSE)
+jaukti_rastrs<-crop(jaukti_rastrs, mezi_jaukti)
+
+plot(skujkoku_rastrs)
+plot(saurlapju_rastrs)
+plot(platlapju_rastrs)
+plot(jaukti_rastrs)
+
+writeRaster(skujkoku_rastrs, "rastrs_skujkoki.tif", overwrite = TRUE)
+writeRaster(saurlapju_rastrs, "rastrs_saurlapji.tif", overwrite = TRUE)
+writeRaster(platlapju_rastrs, "rastrs_platlapji.tif", overwrite = TRUE)
+writeRaster(jaukti_rastrs, "rastrs_jaukti.tif", overwrite = TRUE)
+
+```
+
+## 3. solis.
+Pēc uzdevumā norādītajiem avotiem, dažādām koku sugām ir dažādi vecumu klašu iedalījumi.
+Cietie lapkoki ir goba, ozols un osis. (Avots: https://www.letonika.lv/groups/default.aspx?r=7&q=ir&id=971095&g=1)
+Parējos uzskatīšu par "mīkstajiem" lapkokiem, resp., Viena vecuma klase = 10 gadi.
+```{r}
+#Skujkokiem un "cietajiem" lapkokiem
+vecumu_klase_20 <- c(1, 3, 13, 14, 15, 22, 28, 29, 10, 11, 16, 61, 64, 65)
+#Baltalkšņiem un Salix
+vecumu_klase_5 <- c(9, 21, 20)
+#Pārējiem lapkokiem
+vecumu_klase_10 <- c(4, 6, 8, 19, 24, 25, 26, 27, 32, 35, 50, 62, 63, 66, 67, 68, 69)
+```
+
+Vecuma grupas iedalās šādi:
+1.-2. vecuma klase - jaunaudze;
+??? vecuma klase - vidēja vecuma klase;
+1 vecuma klase pirms ciršanas - briestaudze;
+2 vecuma klases pēc briestaudzes - pieaugusi audze;
+viss pēc pieaugušām audzēm - pāraugusi audze.
+
+Šeit notiek dīvainības. Meža likumā ir noteikti konkrēti vecumi konkrētām sugām, kurās tajās ir veicama galvenā cirte jeb tās ir pieaugušas. 
+Piemēram ozolam, pieņemot I bonitāti, par pieaugušu audzi tiek uzskatītas vismaz 101 gadu vecas audzes, kā rezultātā vecuma grupas ir šādas
+1.-2. vecuma klase (vk) - jaunaudze
+3.-4. vk - vidēja vecuma klase
+5. vk - briestaudze
+6.-7. vk - pieaugusi audze
+8+. vk - pāraugusi audze
+
+Savukārt osim, kuram ir tādas pašas vecuma klases, par pieaugušu audzi tiek uzskatītas vismaz 81 gadu vecas audzes, kas padara vecuma grupu struktūru šādu:
+1.-2. vk - jaunaudze
+3. vk - vidēja vecuma klase
+4. vk - briestaudze
+5.-6. vk - pieaugusi audze
+7+. vk - pāraugusi audze
+
+Ja šis jau sagādā zināmas galvassāpes, situāciju diži neatvieglo lielākā daļa citu sugu kā baltalksnis, kurām nav likumā norādīts pieaugušas audzes vecums. 
+
+Likums piedāvā šādus galvenās cirtes vecumus:
+Ozolam, priedei un lapeglei - 101 gads;
+Eglei, kļavai, osim, liepai, gobai un vīksnai - 81 gads;
+Bērzam un melnalksnim - 71 gads;
+Apsei - 41 gads.
+
+Pēc visas garās prātošanas ir darbs sakārtot. Domāju, ka loģiski būtu pieņemt, ka ātraugošajām sugām (baltalksnis un Salix) būtu zemāks galvenās cirtes vecums, tādēļ uzskatīšu, ka tas ir 41 gads kā apsei.
+Pieņemšu, ka visiem pārējiem, kam galvenās cirtes vecums nav norādīts, tas ir 81 gads, jo tas ir galvenās cirtes vecums lielākajam daudzumam taksonu. 
+```{r}
+#gc=galvenā cirte
+gc41<- c(8, 21, 9, 20, 68, 19) #pieliku vēl papeli, jo būtībā tā ir apse.
+gc71<- c(4, 6) #bērzs un melnalksnis
+gc81<- c(3, 11, 12, 15, 16, 17, 18, 23, 24, 25, 26, 27, 28, 29, 32, 35, 50, 62, 63, 64, 65, 66, 67, 69) #viss pārējais
+gc101<- c(1, 10, 13, 14, 22, 61) #pieliku vēl ciedru priedi, citas priedes un ozolus, jo liekas, ka ir tie paši.
+```
+
+Laikam jāķeras atpakaļ pie darba.
+Problemātiski ir tas, ka grūti jau saprast, kādu vecuma klasi un galvenās cirtes vecumu piešķirt mežam, ņemot vērā, ka var būt situācijas, kurās vienā mežaudzē ir vairāki koku tipi, kuriem var būt dažādi galvenās cirtes vecumi.
+Lai arī es nezinu, kā MVR ievada datus, šoreiz es pieņemšu, ka pirmais koks nosaka vecuma grupu un arī galvenās cirtes vecumu.
+No sākuma piešķiršu visam vecuma klasi un galvenās cirtes vecumu.
+```{r}
+mezi_skujkoku <- mezi_skujkoku %>%
+  mutate(vecumu_klase = case_when(
+    sugas1 %in% vecumu_klase_20 ~ 20,
+    sugas1 %in% vecumu_klase_5  ~ 5,
+    sugas1 %in% vecumu_klase_10 ~ 10,
+    TRUE ~ NA_real_
+  ))
+
+mezi_skujkoku <- mezi_skujkoku %>%
+  mutate(galvena_cirte = case_when(
+    sugas1 %in% gc41 ~ 41,
+    sugas1 %in% gc71 ~ 71,
+    sugas1 %in% gc81 ~ 81,
+    sugas1 %in% gc101 ~ 101,
+    TRUE ~ NA_real_
+  ))
+
+mezi_saurlapju <- mezi_saurlapju %>%
+  mutate(vecumu_klase = case_when(
+    sugas1 %in% vecumu_klase_20 ~ 20,
+    sugas1 %in% vecumu_klase_5  ~ 5,
+    sugas1 %in% vecumu_klase_10 ~ 10,
+    TRUE ~ NA_real_
+  ))
+mezi_saurlapju <- mezi_saurlapju %>%
+  mutate(galvena_cirte = case_when(
+    sugas1 %in% gc41 ~ 41,
+    sugas1 %in% gc71 ~ 71,
+    sugas1 %in% gc81 ~ 81,
+    sugas1 %in% gc101 ~ 101,
+    TRUE ~ NA_real_
+  ))
+
+mezi_platlapju <- mezi_platlapju %>%
+  mutate(vecumu_klase = case_when(
+    sugas1 %in% vecumu_klase_20 ~ 20,
+    sugas1 %in% vecumu_klase_5  ~ 5,
+    sugas1 %in% vecumu_klase_10 ~ 10,
+    TRUE ~ NA_real_
+  ))
+
+mezi_platlapju <- mezi_platlapju %>%
+  mutate(galvena_cirte = case_when(
+    sugas1 %in% gc41 ~ 41,
+    sugas1 %in% gc71 ~ 71,
+    sugas1 %in% gc81 ~ 81,
+    sugas1 %in% gc101 ~ 101,
+    TRUE ~ NA_real_
+  ))
+
+mezi_jaukti <- mezi_jaukti %>%
+  mutate(vecumu_klase = case_when(
+    sugas1 %in% vecumu_klase_20 ~ 20,
+    sugas1 %in% vecumu_klase_5  ~ 5,
+    sugas1 %in% vecumu_klase_10 ~ 10,
+    TRUE ~ NA_real_
+  ))
+
+mezi_jaukti <- mezi_jaukti %>%
+  mutate(galvena_cirte = case_when(
+    sugas1 %in% gc41 ~ 41,
+    sugas1 %in% gc71 ~ 71,
+    sugas1 %in% gc81 ~ 81,
+    sugas1 %in% gc101 ~ 101,
+    TRUE ~ NA_real_
+  ))
+
+```
+
+Jāpiešķir vecuma grupas.
+```{r}
+mezi_skujkoku <- mezi_skujkoku %>%
+  mutate(vecumu_grupa = case_when(
+    a10 <= vecumu_klase*2 ~ 214, # jaunaudze
+    a10 > vecumu_klase*2 & a10 < (galvena_cirte-vecumu_klase) ~ 224, # vidēja vecuma audze
+    a10 >= (galvena_cirte-vecumu_klase) & a10 < galvena_cirte ~ 234, # briestaudze
+    a10 >= galvena_cirte & a10 < (galvena_cirte + vecumu_klase) ~ 244, # pieaugusi audze
+    a10 >= (galvena_cirte + vecumu_klase) ~ 254, # pāraugusi audze
+    TRUE ~ NA_real_)
+    )
+
+mezi_saurlapju <- mezi_saurlapju %>%
+  mutate(vecumu_grupa = case_when(
+    a10 <= vecumu_klase*2 ~ 213, # jaunaudze
+    a10 > vecumu_klase*2 & a10 < (galvena_cirte-vecumu_klase) ~ 223, # vidēja vecuma audze
+    a10 >= (galvena_cirte-vecumu_klase) & a10 < galvena_cirte ~ 233, # briestaudze
+    a10 >= galvena_cirte & a10 < (galvena_cirte + vecumu_klase) ~ 243, # pieaugusi audze
+    a10 >= (galvena_cirte + vecumu_klase) ~ 253, # pāraugusi audze
+    TRUE ~ NA_real_)
+    )
+
+mezi_platlapju <- mezi_platlapju %>%
+  mutate(vecumu_grupa = case_when(
+    a10 <= vecumu_klase*2 ~ 212, # jaunaudze
+    a10 > vecumu_klase*2 & a10 < (galvena_cirte-vecumu_klase) ~ 222, # vidēja vecuma audze
+    a10 >= (galvena_cirte-vecumu_klase) & a10 < galvena_cirte ~ 232, # briestaudze
+    a10 >= galvena_cirte & a10 < (galvena_cirte + vecumu_klase) ~ 242, # pieaugusi audze
+    a10 >= (galvena_cirte + vecumu_klase) ~ 252, # pāraugusi audze
+    TRUE ~ NA_real_)
+    )
+
+mezi_jaukti <- mezi_jaukti %>%
+  mutate(vecumu_grupa = case_when(
+    a10 <= vecumu_klase*2 ~ 211, # jaunaudze
+    a10 > vecumu_klase*2 & a10 < (galvena_cirte-vecumu_klase) ~ 221, # vidēja vecuma audze
+    a10 >= (galvena_cirte-vecumu_klase) & a10 < galvena_cirte ~ 231, # briestaudze
+    a10 >= galvena_cirte & a10 < (galvena_cirte + vecumu_klase) ~ 241, # pieaugusi audze
+    a10 >= (galvena_cirte + vecumu_klase) ~ 251, # pāraugusi audze
+    TRUE ~ NA_real_)
+    )
+```
+
+Laikam tagad ir jāizveido rastri pēc vecuma grupām.
+```{r, cache=TRUE}
+grupa<- c(214, 224, 234, 244, 254)
+
+skujkoku_rastri <- function(mezi_skujkoku, grupa, rastrs10m) {
+  rastri <- list()  
+  for (g in grupa) {
+    grupa_data <- mezi_skujkoku %>%
+      filter(vecumu_grupa == g) %>%
+      st_as_sf()
+    rastrs <- rasterize(grupa_data, rastrs10m, field = g, 
+                        touches = FALSE, background = NA)
+    rastrs <- crop(rastrs, grupa_data)
+    filename <- paste0("rastrs_skujkoki_", g, ".tif")
+    writeRaster(rastrs, filename, overwrite = TRUE)
+    rastri[[as.character(g)]] <- rastrs
+  }
+
+  return(rastri)
+}
+
+skujkoku_rastri(mezi_skujkoku, grupa, rastrs10m)
+
+grupa<- c(213, 223, 233, 243, 253)
+saurlapju_rastri <- function(mezi_saurlapju, grupa, rastrs10m) {
+  rastri <- list()  
+  for (g in grupa) {
+    grupa_data <- mezi_saurlapju %>%
+      filter(vecumu_grupa == g) %>%
+      st_as_sf()
+    rastrs <- rasterize(grupa_data, rastrs10m, field = g, 
+                        touches = FALSE, background = NA)
+    rastrs <- crop(rastrs, grupa_data)
+    filename <- paste0("rastrs_saurlapji_", g, ".tif")
+    writeRaster(rastrs, filename, overwrite = TRUE)
+    rastri[[as.character(g)]] <- rastrs
+  }
+
+  return(rastri)
+}
+saurlapju_rastri(mezi_saurlapju, grupa, rastrs10m)
+
+grupa<- c(212, 222, 232, 242, 252)
+platlapju_rastri <- function(mezi_platlapju, grupa, rastrs10m) {
+  rastri <- list()  
+  for (g in grupa) {
+    grupa_data <- mezi_platlapju %>%
+      filter(vecumu_grupa == g) %>%
+      st_as_sf()
+    rastrs <- rasterize(grupa_data, rastrs10m, field = g, 
+                        touches = FALSE, background = NA)
+    rastrs <- crop(rastrs, grupa_data)
+    filename <- paste0("rastrs_platlapji_", g, ".tif")
+    writeRaster(rastrs, filename, overwrite = TRUE)
+    rastri[[as.character(g)]] <- rastrs
+  }
+
+  return(rastri)
+}
+
+platlapju_rastri(mezi_platlapju, grupa, rastrs10m)
+
+grupa<- c(211, 221, 231, 241, 251)
+jaukti_rastri <- function(mezi_jaukti, grupa, rastrs10m) {
+  rastri <- list()  
+  for (g in grupa) {
+    grupa_data <- mezi_jaukti %>%
+      filter(vecumu_grupa == g) %>%
+      st_as_sf()
+    rastrs <- rasterize(grupa_data, rastrs10m, field = g, 
+                        touches = FALSE, background = NA)
+    rastrs <- crop(rastrs, grupa_data)
+    filename <- paste0("rastrs_jaukti_", g, ".tif")
+    writeRaster(rastrs, filename, overwrite = TRUE)
+    rastri[[as.character(g)]] <- rastrs
+  }
+
+  return(rastri)
+}
+
+jaukti_rastri(mezi_jaukti, grupa, rastrs10m)
+```
+
+## 4. solis.
+Ielasu iepriekš sataisītos rastrus, lai tos varētu apvienot.
+```{r}
+#Ļoti neglīts kods, bet uz sitiena nevaru izdomāt kā salabot. Gan jau jāievieš funkcija. 
+skujkoki111<-rast("rastrs_skujkoki_214.tif")
+skujkoki222<-rast("rastrs_skujkoki_224.tif")
+skujkoki333<-rast("rastrs_skujkoki_234.tif")
+skujkoki444<-rast("rastrs_skujkoki_244.tif")
+skujkoki555<-rast("rastrs_skujkoki_254.tif")
+saurlapji111<-rast("rastrs_saurlapji_213.tif")
+saurlapji222<-rast("rastrs_saurlapji_223.tif")
+saurlapji333<-rast("rastrs_saurlapji_233.tif")
+saurlapji444<-rast("rastrs_saurlapji_243.tif")
+saurlapji555<-rast("rastrs_saurlapji_253.tif")
+platlapji111<-rast("rastrs_platlapji_212.tif")
+platlapji222<-rast("rastrs_platlapji_222.tif")
+platlapji333<-rast("rastrs_platlapji_232.tif")
+platlapji444<-rast("rastrs_platlapji_242.tif")
+platlapji555<-rast("rastrs_platlapji_252.tif")
+jaukti111<-rast("rastrs_jaukti_211.tif")
+jaukti222<-rast("rastrs_jaukti_221.tif")
+jaukti333<-rast("rastrs_jaukti_231.tif")
+jaukti444<-rast("rastrs_jaukti_241.tif")
+jaukti555<-rast("rastrs_jaukti_251.tif")
+skujkoki<-rast("rastrs_skujkoki.tif")
+saurlapji<-rast("rastrs_saurlapji.tif")
+platlapji<-rast("rastrs_platlapji.tif")
+jaukti<-rast("rastrs_jaukti.tif")
+ladstrs<-rast("ladrastrs.tif")
+
+```
+Apvienoju rastrus, lietojot merge. Tā kā prasīts piešķirt mazākajām vērtībām lielāku svaru, lietoju papildargumentu *method="min"*, kas piešķir šūnai vērtību, balstoties uz mazāko vērtību.
+```{r, cache=TRUE}
+rastri_parejie <- list(skujkoki333, skujkoki444, skujkoki555, saurlapji111, saurlapji222, saurlapji333, saurlapji444, saurlapji555, platlapji111, platlapji222, platlapji333, platlapji444, platlapji555, jaukti111, jaukti222, jaukti333, jaukti444, jaukti555, ladstrs)
+
+rastru_kombinesana <- function(skujkoki111, skujkoki222, rastri_parejie) {
+  mezu_rastri <- merge(skujkoki111, skujkoki222, method="min")
+  for (r in rastri_parejie) {
+    mezu_rastri <- merge(mezu_rastri, r, method="min")
+  }
+  writeRaster(mezu_rastri, "visi_rastri.tif", overwrite = TRUE)
+  return(mezu_rastri)
+}
+
+rastru_kombinesana(skujkoki111, skujkoki222, rastri_parejie)
+visi_rastri<-rast("visi_rastri.tif")
+plot(visi_rastri)
+visi_rastri
+```
+
+
+## 5. solis.
+Ir jāaprēķina cik šūnās ir gan mežu dati, gan lauku dati.
+To īsti nesaprotu kā varētu izdarīt no jau radītā visa kopīgā rastra. Man patika Betijas risinājums, kurā viņa salīdzina lauka rastra un apvienotu mežu rastra vērtības. Pamēģināšu īstenot kaut ko līdzīgu.
+```{r}
+#Izveidoju rastru
+meza_rastri_parejie<- list(skujkoki333, skujkoki444, skujkoki555, saurlapji111, saurlapji222, saurlapji333, saurlapji444, saurlapji555, platlapji111, platlapji222, platlapji333, platlapji444, platlapji555, jaukti111, jaukti222, jaukti333, jaukti444, jaukti555)
+
+meza_rastru_kombinesana <- function(skujkoki111, skujkoki222, meza_rastri_parejie) {
+  mezu_rastri <- merge(skujkoki111, skujkoki222, method="min")
+  for (r in meza_rastri_parejie) {
+    mezu_rastri <- merge(mezu_rastri, r, method="min")
+  }
+  writeRaster(mezu_rastri, "mezu_visi_rastri.tif", overwrite = TRUE)
+  return(mezu_rastri)
+}
+
+meza_rastru_kombinesana(skujkoki111, skujkoki222, meza_rastri_parejie)
+mezi_visi_kopa<-rast("mezu_visi_rastri.tif")
+plot(mezi_visi_kopa)
+mezi_visi_kopa
+```
+Tagad varam salīdzināt.
+
+```{r}
+lad_sunas   <- ladstrs == 100
+mezi_sunas <- mezi_visi_kopa %in% c(211, 221, 231, 241, 251, 212, 222, 232, 242, 252, 213, 223, 233, 243, 253, 214, 224, 234, 244, 254)
+lad_sunas
+mezi_sunas
+lad_sunas<- crop(lad_sunas, mezi_sunas)
+parklajusas <- lad_sunas & mezi_sunas
+
+parklajusas_skaits <- global(parklajusas, "sum", na.rm = TRUE)
+print(parklajusas_skaits)
+
+```
+Kopumā ir 699 šūnas, kurās ir gan lauki, gan meži, kas var sagādāt problēmas mēģinot šos rastrus lietot ekoloģiskā analīzē, jo rodas jautājums - tad šūnā ir lauks vai mežs?
+
+##6. solis.
+
+Tagad man ir jānoskaidro cik šūnu ir Latvijas sauszemes teritorijā, kurām nav vērtību.
+Tas ir problemātiski, jo jūrai arī ir NA vērtības. Par laimi mums ir references rastri, pēc kuriem var pateikt, kur ir sauszeme.
+```{r}
+rastrs10m_visiem<- crop(rastrs10m, visi_rastri)#apgriežu, lai iederās visā rastrā.
+plot(rastrs10m_visiem) #skaisti.
+skaits_kopa<- global(rastrs10m_visiem, "sum", na.rm = TRUE)
+print(skaits_kopa)
+```
+
+```{r}
+bez_datiem<-is.na(visi_rastri)
+zeme_bez_datiem<-bez_datiem & (rastrs10m_visiem==1)
+skaits<- global(zeme_bez_datiem, "sum", na.rm = TRUE)
+print(skaits)
+procentos<-((skaits/skaits_kopa)*100)
+print(procentos)
+```
+Kopā ir 166936216 šūnas, kurām nav vērtību, kas ir 81.7% no visas sauszemes teritorijas. 
