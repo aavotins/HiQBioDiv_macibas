@@ -1,0 +1,196 @@
+---
+title: "7. uzd"
+author: "Raitis Riters"
+date: "2025-06-24"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Darba izpildei man bija nepieciešamas šādas pakotnes
+```{r, message=FALSE, warning=FALSE}
+library(exactextractr)
+library(arrow)
+library(curl)
+library(terra)
+library(sf)
+library(tidyverse)
+library(microbenchmark)
+```
+
+## 1. uzdevums
+Jālejupielādē parketa fails.
+```{r, cache=TRUE}
+pts100_url <- "https://zenodo.org/records/14277114/files/pts100_sauzeme.parquet?download=1"
+vieta <- "./pts100_sauzeme.parquet"
+curl_download(pts100_url, destfile = vieta)
+```
+Ielasu.
+```{r}
+pts100<-read_parquet("./pts100_sauzeme.parquet")
+```
+Manuprāt, efektīvākais veids, kā šo uzdevumu, ir izgriezt tikai tos šūnu centrus, kas atrodas karšu lapu iekšienē. 
+```{r, warning=FALSE, message=FALSE}
+uzd5<- rast("../Uzd05/apaksuzdevums4.tif")
+pts100<- st_as_sf(pts100)
+pts100<- st_set_crs(pts100, 3059)
+pts100_5uzd<- st_crop(pts100, uzd5)
+```
+
+Jāapgriež arī 6. uzdevuma rastrs.
+```{r}
+visi_rastri<- rast("../Uzd06/visi_rastri.tif")
+visi_rastri<- crop(visi_rastri, uzd5)
+plot(visi_rastri)
+```
+Darbam arī kaut kad būs nepieciešams 100m references rastrs. 
+```{r}
+ref_rastrs_100m <- rast("../Uzd03/rastrs/LV100m_10km.tif")
+```
+
+Nu tā, laikam jāsāk strādāt ar jauno pakotni *exactextractr*. Man ir jāaprēķina īpatsvars visām klasēm katrā šūnu centrā un 500m rādiusā ap to.
+*Pts100* failā ir tikai punktu ģeometrijas, tādēļ tām ir jāuzliek buferis jeb darbā paradzētais 500m rādiuss ap punktu
+```{r}
+pts100_5uzd <- st_buffer(pts100_5uzd, dist = 500)
+```
+
+Iepazīstoties nedaudz ar *exactextractr* (https://isciences.gitlab.io/exactextractr/), šķiet, ka jālieto arguments *fun="frac"*
+```{r}
+pts100_5uzd_frac <- exact_extract(visi_rastri, pts100_5uzd, fun = "frac")
+```
+
+Tālāk veidošu funkciju, kas ražo nepieciešamos rastrus. 
+```{r}
+pts100_5uzd_frac <- as.data.frame(pts100_5uzd_frac) #lai savienotu
+pts100_5uzd_frac <- cbind(pts100_5uzd, pts100_5uzd_frac) #savienoju
+
+#Tā kā jātaisa atsevišķs rastrs katram īpatsvaram, norādu katru vērtību šeit.
+kodi<- c("100", "211", "212", "213", "214", "221", "222", "223", "224", "231", "232", "233", "234", "241", "242", "243", "244", "251", "252", "253", "254")
+
+rastru_rupnica<- function(pts100_5uzd_frac, kodi, ref_rastrs_100m){
+  for(k in kodi){
+    frac_atdalita<- pts100_5uzd_frac %>% select(contains(paste0("frac_", k)), geom)
+    frac_atdalita<- st_as_sf(frac_atdalita)
+    st_crs(frac_atdalita) <- st_crs(ref_rastrs_100m)
+    rastram<- rasterize(frac_atdalita, ref_rastrs_100m, field = paste0("frac_", k), fun="mean", background = 0, na.rm = TRUE)
+    rastram<- crop(rastram, frac_atdalita)
+    faila_vieta<- paste0("./pts100_", k, ".tif")
+    writeRaster(rastram, faila_vieta , overwrite = TRUE)
+  }
+}
+
+rastru_rupnica(pts100_5uzd_frac, kodi, ref_rastrs_100m)
+```
+
+##2. uzdevums
+Lejupielādēšu tīklus. 
+```{r}
+tikls100_url<-"https://zenodo.org/records/14277114/files/tikls100_sauzeme.parquet?download=1"
+vieta_100t<-"./tikls100_sauzeme.parquet"
+curl_download(tikls100_url, destfile = vieta_100t)
+
+tikls300_url<-"https://zenodo.org/records/14277114/files/tikls300_sauzeme.parquet?download=1"
+vieta_300t<-"./tikls300_sauzeme.parquet"
+curl_download(tikls300_url, destfile = vieta_300t)
+
+```
+Ielasu
+```{r}
+tikls_100 <- read_parquet("./tikls100_sauzeme.parquet")
+tikls_300 <- read_parquet("./tikls300_sauzeme.parquet")
+```
+
+Jāizvēlas desmit blakusesoši 1km kvadrāti ar LAD datiem.
+Izvēlējos gan kvadrātus ar laukiem, gan šūnām bez laukiem. 
+```{r}
+#Izdalu izvēlētos kvadrātus
+izdaliti_kvadrati100<- tikls_100 %>% filter(ID1km %in% c("1kmX538Y275", "1kmX538Y274", "1kmX538Y273", "1kmX538Y272", "1kmX538Y271", "1kmX539Y275", "1kmX539Y274", "1kmX539Y273", "1kmX539Y272", "1kmX539Y271"))
+
+#Pieliku 3km buferi
+izdaliti_kvadrati100<- st_as_sf(izdaliti_kvadrati100)
+izdaliti_kvadrati100<- st_buffer(izdaliti_kvadrati100, dist = 3000)
+```
+
+#1. solis- 100m tīkls, 10m šūna
+Ielasu rastru, kura šūnas lielums ir 10m un kurā ir informācija par lauku klātbūtni.
+```{r}
+LAD_10m <- rast("../Uzd03/centra10m.tif")
+```
+
+```{r}
+tikls10_frac_laiks<-microbenchmark(tikls10_frac <- exact_extract(LAD_10m, izdaliti_kvadrati100, fun = "frac"), times = 10)
+
+print(tikls10_frac_laiks, unit="s")
+```
+
+Vidēji šī .rmd faila taisīšanas laikā darbība prasīja 39 sekundes.
+
+#2. solis- 100m tīkls, 100m šūna
+Ielasu rastru, kura šūnas lielums ir 100m un kurā ir informācija par lauku klātbūtni.
+```{r}
+LAD_100m <- rast("../Uzd03/r_100m_binari.tif")
+plot(LAD_100m)
+```
+
+```{r}
+tikls100_frac_laiks<-microbenchmark(tikls100_frac <- exact_extract(LAD_100m, izdaliti_kvadrati100, fun = "frac"), times = 10)
+
+print(tikls100_frac_laiks, unit="s")
+```
+Rmd faila taisīšanas laikā darbība prasīja vidēji 2.7 sekundes.
+
+#3. solis- 300m tīkls, 10m šūna, jāsasaista ar 100m tīklu.
+Izdalu tās 300m šūnas, kas ietilpst laukumos.
+```{r}
+izdaliti_300<- tikls_300 %>% filter(rinda300 %in% izdaliti_kvadrati100$rinda300)
+```
+
+Pielieku buferi
+```{r}
+izdaliti_300<- st_as_sf(izdaliti_300)
+izdaliti_300<- st_set_crs(izdaliti_300, 3059)
+izdaliti_300<- st_buffer(izdaliti_300, dist=3000)
+```
+
+```{r}
+tikls300_10_frac_laiks<-microbenchmark(tikls300_10_frac <- exact_extract(LAD_10m, izdaliti_300, fun = "frac"), times = 10)
+
+print(tikls300_10_frac_laiks, unit="s")
+```
+Rmd veidošanas laikā darbība prasīja vidēji 5.1  sekundes.
+
+#4. solis- 300m tīkls, 100m šūna, 
+```{r}
+tikls300_100_frac_laiks<-microbenchmark(tikls300_100_frac <- exact_extract(LAD_100m, izdaliti_300, fun = "frac"), times = 10)
+
+print(tikls300_100_frac_laiks, unit="s")
+```
+Šī darbība, kamēr tika veidots rmd fails, prasīja 0.5 sekundes.
+
+Daudz mazāku laiku aizņēma informācijas aizņēma īpatsvaru aprēķini no 100m rastriem. Konkrētāk- aptuveni desmit reizes mazāku laiku
+Mazāku laiku aizņēma arī 300m tīkli.
+Liekas loģiski- Lielākas rastra šūnas-> mazāks šūnu skaits-> mazāka laika pavadīta skaitļojot.
+```{r}
+tikls10_frac
+summary(tikls10_frac$frac_1)
+```
+
+```{r}
+tikls100_frac
+summary(tikls100_frac$frac_1)
+```
+
+```{r}
+tikls300_10_frac
+summary(tikls300_10_frac$frac_1)
+```
+
+```{r}
+tikls300_100_frac
+summary(tikls300_100_frac$frac_1)
+```
+Būtībā nāk ļoti līdzīga informācija no abiem 10m un abiem 100m rastriem.
+Starp 10m un 100m ir manāmas atšķirības. Rezultātiem no 10m rastriem ir mazāka vidējā vērtība, un liekas, ka tā varētu būt precīzāka informācija, bet vai tā ir diži nozīmīga atšķirtība, manu-pagaidām nespeciālista-prāt, ir grūti spriest. 
+Domāju, ka turpmāk jālieto 300m tīkls aprēķiniem, jo tas ir ievērojami ātrāks nekā ar 100m tīkliem, bet iegūst samērā līdzīgu informāciju. Ja vēlas precīzāku informāciju un nav žēl skaitļot ilgāk - jālieto 10m rastrs. Tomēr, liekas, ka efektīvāk ir lietot 100m rastru. 
