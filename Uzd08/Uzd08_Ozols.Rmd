@@ -1,0 +1,61 @@
+---
+title: "Uzd08_Ozols"
+author: "Janis Ozols"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+Sagatavojam darba vidi ielasot pakotnes
+```{r,packages, warning=FALSE,message=FALSE}
+if (!require("sf")) install.packages("sf");library(sf)
+if (!require("arrow")) install.packages("arrow");library(arrow)
+if (!require("sfarrow")) install.packages("sfarrow");library(sfarrow)
+if (!require("dplyr")) install.packages("dplyr");library(dplyr)
+if (!require("terra")) install.packages("terra");library(terra)
+if (!require("tools")) install.packages("tools");library(tools)
+```
+Uzdevumu veiciet GEE interneta pārlūkā (JavaScript) vai ar R pakotnēm, izmantojiet harmonizēto Sentinel-2 kolekciju visai Latvijas teritorijai. Latvijas teritoriju definējiet ar projekta Zenodo repozitorijā doto 100 m vektordatu tīklu.
+```{r,shp fails}
+#uzdevumu veiksim GEE interneta pārlūkā. Gee atbalsta shape failu formātu, līdz ar to parquet failu pārveidosim par shp failu, tā kā fails pārsniedz dbf lielumu > 2gb, sadalīsim parquet failu pa 50 km lapām. 
+#Mēģināju darīt ar R pakotnēm, bet problēma radās ar rgee instalāciju, rakstīja, ka nav python vides, mēģināju notīrīt un uzinstalēt, bet neizdevās, laikam jāpārliek python uz jaunāku versiju un jādefinē vidi python, tad jāielasa rgee to norādot, bet neesmu pārliecināts, ka sanāks, tāpēc mēģināšu pārlūkā sadalot failu lapās
+tikls100 <- st_read_parquet("../Uzd03/tikls100_sauzeme.parquet") |> 
+  st_as_sf()
+if (!inherits(tikls100$geom, "sfc")) {
+  st_geometry(tikls100) <- "geom"
+}
+tikls100 <- st_make_valid(tikls100)
+unique_tiles <- unique(tikls100$tks50km)
+output_dir <- "tks50km_shapefiles"
+zip_dir <- "zipped_shapefiles"
+dir.create(zip_dir, showWarnings = FALSE)
+dir.create(output_dir, showWarnings = FALSE)
+for (tile in unique_tiles) {
+  tile_data <- tikls100 %>% dplyr::filter(tks50km == tile)
+  fname <- paste0("tks50km_", tile)
+  shapefile_path <- file.path(output_dir, fname)
+  st_write(tile_data, paste0(shapefile_path, ".shp"), delete_layer = TRUE)
+  files_to_zip <- list.files(output_dir, pattern = paste0("^", fname, "\\."), full.names = TRUE)
+  zipfile <- file.path(zip_dir, paste0(fname, ".zip"))
+  zip(zipfile = zipfile, files = files_to_zip, flags = "-j")
+}
+```
+Šeit ir links uz radīto projektu ar visām komandrindām: https://code.earthengine.google.com/?accept_repo=users/janisozols/uzdevums8
+Projektā ir 6 skripti, skripts rezgis_100m - apvieno visas tks50km lapas vienā failā, skripts apaksuzdevums1 - izpilda visu 1.-1.3 uzdevumā prasīto, skripts apaksuzdevums2 - izpildu visu 2-2.3 uzdevumā prasīto, skripts lejupielāde - izpilda vēlreiz 2.3 uzdevumu vienai lapai un sadala to daļās lejupielādei, skripts tiek manuāli palaists katrai lapai nomainot lapas nr pie var assetId, skripts uzdevums3 aprēķina IQR, skripts IQR_karte apvieno IQR failus un attēlo kartē, tālāk apvienosim šeit iegūtos rastrus:
+```{r,uzdevums3}
+tif_files <- list.files(path = "../Uzd08/GEE_Exports", pattern = "\\.tif$", full.names = TRUE)
+rasters <- lapply(tif_files, rast)
+rasters
+NDVI_LV <- do.call(merge, rasters)
+writeRaster(NDVI_LV, "NDVI_LV.tif", overwrite = TRUE)
+plot(NDVI_LV)
+```
+```{r,valmiera}
+lapas <- st_read_parquet("../Uzd03/tks93_50km.parquet")
+lapasuni <- unique(lapas$NOSAUKUMS)
+lapasuni
+lapas <- lapas %>% filter(lapas$NOSAUKUMS == "Krāslava")
+lapas
+```
