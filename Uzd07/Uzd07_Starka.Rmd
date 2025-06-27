@@ -1,0 +1,388 @@
+---
+title: "Uzd07_Starka"
+author: "Rūta Starka"
+date: "2025-06-22"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Sagatavošanās
+Uzdevumam nepieciešamās pakotnes:
+```{r packages, message=FALSE, warning=FALSE, results='hide', cache=TRUE}
+packages <- c("sf", "sfarrow", "terra", "tidyverse", "dplyr", "fasterize", "doParallel", "foreach", "ggplot2", "exactextractr","raster","microbenchmark")
+missing_packages <- packages[!packages %in% installed.packages()[, "Package"]]
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages)
+}
+lapply(packages, require, character.only = TRUE)
+rm (missing_packages, packages)
+```
+# 1. uzdevums
+Sākumā ielasīšu visus nepieciešamos failus.
+
+## 100 m šūnu centru references dati:
+```{r 100mref}
+pts100_sauszeme=st_read_parquet("../Uzd03/ref_vektordati/pts100_sauzeme.parquet")
+str(pts100_sauszeme) # varēšu izmantot lauku tks50km filtrēšanai pa kartes lapām
+```
+
+## 5. uzdevumā izvēlēto karšu lapu ielasīšana. 
+Biju iezvēlējusies četrus blakus esošus 50km kvadrātus ar nosaukumiem "Rīga", "Jūrmala", "Jelgava", "Baldone". Uzdevuma laikā biju sagatavojusi katru no šīm lapām kā atsevišķu geoparquet failu, kam jau salāgota koordinātu sistēma ar MVR datiem. Tomēr ņemot vērā, ka tajos jau ir MVR dati, kas šos failus padara 'smagākus' un atsevišķu failu ar četrām lapām nebiju saglabājusi, tagad ātri replicēju to pašu, ko 5. uzdevumā, proti četru kartes lapu atlasi, ko šoreiz gan saglabāju, varbūt saimniecībā noderēs. 
+
+```{r kartesLapas, cache=TRUE, warning=FALSE}
+tks93_50km=st_read_parquet("../Uzd03/ref_vektordati/tks93_50km.parquet")
+kartes4Lapas <- tks93_50km %>% 
+  filter(NOSAUKUMS %in% c("Rīga", "Jūrmala", "Jelgava", "Baldone"))
+str(kartes4Lapas)
+unique(kartes4Lapas$NUMURS) # šīm teritorijām numuri ir 4222 4311 3244 3333
+st_crs(kartes4Lapas) ##LKS92 / Latvia TM
+st_write_parquet(kartes4Lapas, dsn="kartes4Lapas.parquet")
+rm(tks93_50km)#noņemu pārējās kartes lapas no vides
+```
+
+## 100 m references limitēšana līdz kartes lapu robežām
+Šāds būs nepieciešams 1. apakšuzdevuma beigās. Izdomāju, ka varu vienkāši to darīt, nofiltrējot no šī paša references tīkla pēc lauka "tks50km" vērtības 4222 4311 3244 3333, kas ir manis izvēlētās kartes lapas. 
+
+```{r kartesLapas100ref, cache=TRUE}
+ref100_kartes4Lapas= pts100_sauszeme %>% filter(tks50km=="4222"|tks50km=="4311"|tks50km=="3244"|tks50km=="3333")
+
+ggplot() +
+  geom_sf(data = ref100_kartes4Lapas, color = "red") +
+  geom_sf(data = kartes4Lapas, fill = "lightgrey", color = "black", alpha=0.5) +
+    theme_minimal()
+```
+
+Ir kaut kāda neliela nesakritība, proti, 100m references šūnas ir arī nedaudz ārpus 50km kartes lapām, bet būs ok.
+Eksportēju kā geoparquet failu, varbūt saimniecībā noderēs.
+
+```{r kartesLapas100refExport, cache=TRUE, warning=FALSE}
+st_write_parquet(ref100_kartes4Lapas, dsn="ref100_kartes4Lapas.parquet")
+
+```
+
+Izveidoju references rastru:
+```{r centroidi100m, cache=TRUE}
+ref_rastrs100m=rast("../Uzd03/ref_rastrs/LV100m_10km.tif")
+crs(ref_rastrs100m)#PROJCRS["LKS92 / Latvia TM" ...ok
+
+#apgriežu līdz izvēlēto kartes lapu robežām
+ref_rastrs_kartes4Lapas=crop(ref_rastrs100m,ref100_kartes4Lapas)
+plot(ref_rastrs_kartes4Lapas)
+```
+
+
+## Mežu klasifikācijas rastrs
+Tagad ielasu 6. uzdevumā sastrādātu LAD un mežu klasifikācijas rastru.
+Salāgoju koordinātu sistēmas.
+```{r LADmezuRastrs, cache=TRUE}
+LADmezu_rastrs=rast("../Uzd06/LAD_un_mezi_ar0.tif")
+crs(LADmezu_rastrs)# esmu aizmirsusi norādīt koordinātu sistēmu pirms šī rastra eksporta.. mana kļūda 6. uzdevumā.
+
+#pārņemu koordinātu sistēmu
+crs(LADmezu_rastrs) <- crs(ref_rastrs100m)
+st_crs(crs(LADmezu_rastrs))
+
+#paskatos šūnu izmēru
+res(LADmezu_rastrs)# 10x 10 m
+```
+Pagaidām vēl neapgriežu to līdz kartes lapu robežām, lai nezaudētu informāciju tiem pikseļiem, kas ir tuvumā šo lapu malām. Ja apgriezīšu, tad informācija par platības īpatsvaru uz kartes lapas robežām būs neprecīza. 
+
+Jautājums diskusijai - kā vispār ir ar šādu mainīgo aprēķināšu (platības īpatsvars) uz Latvijas robežām? Informācija par mežiem otrpus robežai nav pieejama, tomēr sugas tas ietekmē. Aprēķot tikai Latvijas pusē esošajiem mežiem, sanāk nepilnīga informācija! Gar jūru tā nav problēma, jo jūrā iekšā mežu tiešām nav, bet gar sauszemes robežu - aiz tās nav tukšums. Interesanti.
+
+## Buferzonu (500m) sagatavošana 
+Laikam jāsagatavo 500 m buferzonas ap 100m šūnu centriem, un tikai tad varēs veikt kaut kādus aprēķinus. Par cik ik katras 100m šūnas 500m buferzona pārklājas ar blakus esošo 100m šūnu buferzonām, tad jāizmanto vektordatu variants. 
+
+```{r buferzonas500, cache=TRUE}
+sunu500m_buferi=st_buffer(ref100_kartes4Lapas,500)
+```
+
+
+## Klašu īpatsvari
+Tagad rēķināšu katras klases platības īpatsvaru no LAD-mežu rastra 500 m buferzonā no katras 100m šūnas centra. 
+
+Šis ir neizdevies risinājums:
+
+```{r LAD_mezu_ipatsvars500m, eval=FALSE, cache=TRUE, include=FALSE}
+klases_ipatsvari <- list()
+
+# Cikls
+for(i in seq_along(sunu500m_buferi)) {
+  buf <- sunu500m_buferi[i]
+  
+  # Ar exactextract iegūstu klašu vērības bufera poligonā
+  klasu_vertibas_list <- exactextractr::exact_extract(LADmezu_rastrs, buf, progress=FALSE)
+  
+ vertibas <- unlist(klasu_vertibas_list)
+  
+  # noņemu NA, lai varētu aprēķināt šūnu skaitu ar jebkādām īstām vērtībām
+  vertibas <- vertibas[!is.na(vertibas) & vertibas > 0]
+  
+  total_cells <- length(vertibas)
+  
+  if(total_cells == 0) {
+    next
+  }
+  
+  # iegūstu unikālās klašu vērtības
+  unique_vertibas <- sort(unique(vertibas))
+  
+  # katrai unikālai klases vērtībai, aprēķinu šūnu skaitu un īpatsvaru
+  df <- data.frame(
+    buffer_id = i,
+    raster_value = unique_vertibas,
+    count = sapply(unique_vertibas, function(v) sum(vertibas == v)),
+    proportion = sapply(unique_vertibas, function(v) sum(vertibas == v) / total_cells)
+  )
+  
+  klases_ipatsvari[[i]] <- df
+}
+
+# Apvienoju rezultātu tabulā
+klasu_ipatsvari <- bind_rows(klases_ipatsvari)
+print(klasu_ipatsvari)
+gc()
+
+```
+
+Pēc 3h ieguvu paziņojumu par nepietiekamu RAM. Skaisti!
+
+Daru citādi. Būtu bijis daudz ātrāk šo darīt ar exactextractr::frac() funkciju, par kuru izlasīju, kad jau pusotru stundu šis cikls bija griezies, un bija žēl to apstādināt. 
+
+```{r LAD_mezu_ipatsvars500mV2, cache=TRUE}
+klasu_ipatsvari2 <- exactextractr::exact_extract(
+  LADmezu_rastrs, 
+  sunu500m_buferi, 
+  fun="frac", 
+  append_cols="id")
+str(klasu_ipatsvari2)
+head(klasu_ipatsvari2)
+```
+
+Šis bija ātrāk, DAUDZ ātrāk. 
+
+## Savienošana
+Savienošu pēc id un izveidošu klasēm normālus nosaukumus. Šobrīd pēc exactextract ir "frac_", kam seko klases numurs. Gribu pārtaisīt tā, lai ir "klase_[num]_ipatsvars"
+```{r IDjoin, cache=TRUE}
+frakcijas=left_join(sunu500m_buferi,klasu_ipatsvari2,by="id")
+
+parsaucamas <- colnames(frakcijas)[7:32]
+nosaukumi <- sapply(parsaucamas, function(col_name) {
+  # iegūstu klases numuru
+  num <- str_extract(col_name, "(?<=frac_)[0-9]+")
+  # jaunais nosaukums
+  paste0("klases_", num, "_ipatsvars")
+})
+
+# piešķiru jaunos nosaukumus
+colnames(frakcijas)[7:32] <- nosaukumi
+names(frakcijas)
+
+```
+
+## Rasterizēšana
+
+Rasterizēju vidējo klases īpatsvaru katrā 100m šūnā katrai klasei.
+```{r buf500Rastrs, cache=TRUE}
+
+# atlasu kolonnas, kas satur interesējošās klases (neinteresē klase 0, kas ir neklasificētā ainava)
+klases <-  colnames(frakcijas)[8:32]
+
+for (klase in klases) {
+  rastri <- rasterize(frakcijas, ref_rastrs_kartes4Lapas, field = klase, fun = "mean")
+  writeRaster(rastri, paste0(klase, ".tif"), overwrite = TRUE)
+}
+```
+
+Cikls strādā kādu laiciņu, bet rezultējošie rastri, šķiet, ir pareizi. Atļaušos demonstrēt:
+```{r problematiskieRastri, cache=TRUE}
+klases224ipatsvars=rast("klases_224_ipatsvars.tif")
+plot(klases224ipatsvars)
+```
+
+
+Notīru vidi no turpmāk nevajadzīgā.
+```{r cleanclean, warning=FALSE}
+rm(klasu_ipatsvari2,frakcijas,ref_rastrs100m,ref100_kartes4Lapas,sunu500m_buferi,LADmezu_rastrs)
+```
+
+
+# 2. uzdevums
+Sākumā atkal ielasu nepieciešamos failus. 
+
+## LAD lauku bloki
+
+Ņemot vēŗa, ka uzdevums prasa gan platības īpatsvaru, gan klātbūtni, tad no 3. uzdevumā sastrādātā ielasu divus rastrus attiecīgi. 
+Tomēr šeit es vēlos piebilst, ka nespēju aptvert loģiku rēķināt īpatsvaru (frakcijas) no īpatsvariem... (2.2. un 2.4. uzdevumi). Rezultātā sanāks frakcijas katrai unikālai īpatsvara vērtībai. Varbūt es kaut ko nesaprotu pareizi? Katrā ziņā priekš 2.2. tad es izdarīšu kā rakstīts uzdevumā, bet 2.4. tas rezultējās 100 frakcijās (jo īpatsvars tika izteikts procentos), un katra frakcija ir niecīga (sanāk katrai unikālai procenta vērtībai). Tas nelikās loģiski, tāpēc pārtaisīju, 2.4. uzdevumam par pamatu ņemot tomēr lauku klātbūtni 100m šūnās (binārais rastrs).
+
+```{r LAD3uzd, cache=TRUE}
+#lauku īpatsvaru 100m šūnā
+LADipatsvars100=rast("../Uzd03/LAD_rastrs_100sum.tif")
+#lauku klātbūtne 10 m šūnā
+LADklatbutne10=rast("../Uzd03/LAD_rastrs.tif")
+
+#ielasu arī LAD klātbūtni 100m šūnā, kas liekas loģiskāk priekš 2.2. un 2.4. uzdevuma.
+LADklatbutne100=rast("../Uzd03/LAD_rastrs_100bin.tif")
+```
+
+## 1km references kvadrāti
+No šiem uzreiz arī atlasu interesējošos, blakus esošos 10 kvadrātus. Ņemšu 2x5 kvadrātu kopu.
+
+```{r km1kvadrati, cache=TRUE}
+tikls1km=st_read_parquet("../Uzd03/ref_vektordati/tikls1km_sauzeme.parquet")
+
+#atlasu pēc loģikas divas secīgas X vērtības, piecas secīgas Y vērtības
+kartes10Lapas <- tikls1km %>% 
+  filter(ID1km %in% c("1kmX474Y275", "1kmX474Y276", "1kmX474Y277", "1kmX474Y278", "1kmX474Y279",
+                      "1kmX475Y275", "1kmX475Y276", "1kmX475Y277", "1kmX475Y278", "1kmX475Y279"))
+
+#ielasu references rastru
+ref_rastrs100m=rast("../Uzd03/ref_rastrs/LV100m_10km.tif")
+
+#apgriežu references rastru līdz izvēlēto kartes lapu robežām
+ref_rastrs_kartes10Lapas=crop(ref_rastrs100m,kartes10Lapas)
+```
+
+## 300 un 100 m tīklu centri (punkti)
+```{r tikluCentri, cache=TRUE}
+#ja izdzēsts, ieslasu pa jaunu:
+# pts100_sauszeme=st_read_parquet("../Uzd03/ref_vektordati/pts100_sauzeme.parquet")
+
+pts300_sauszeme=st_read_parquet("../Uzd03/ref_vektordati/pts300_sauzeme.parquet")
+```
+
+Apgriežu tos līdz izvēlētajām 1km kvadrātiem.
+To izdaru filtrējot pēc tā paša lauka, jo visi šie references dati ir savstarpēji sasaistīti (viens otru referencē), izņemt 300 m kvadrātu centriem, tāpēc tur izmantoju st_intersection(). Apskatu arī, lai pārliecinātos.
+```{r tikluCentriCROP, cache=TRUE}
+pts100_10x1km=st_intersection(pts100_sauszeme, kartes10Lapas)
+  
+pts300_10x1km=st_intersection(pts300_sauszeme, kartes10Lapas)
+
+
+ggplot() +
+  geom_sf(data = kartes10Lapas, color = "blue")+
+  geom_sf(data = pts100_10x1km, color = "red") +
+  geom_sf(data = pts300_10x1km, fill = "lightgrey", color = "black", alpha=0.5)+
+  theme_minimal()
+```
+Labi, šķiet, ka laikam vajadzīgais ir sanācis.
+
+## Buferzonu izveide
+Izveidoju 3km buferzonas. 
+```{r buferi3km, cache=TRUE}
+# 3km buferis 100m šūnu centriem
+buf3km_100m=st_buffer(pts100_10x1km, dist = 3000)
+buf3km_300m=st_buffer(pts300_10x1km, dist = 3000)
+```
+
+Tīri priekš sevis, es vēlos apskatīt, kas sanācis. 
+```{r buferuApskate, cache=TRUE}
+ggplot() +
+  geom_sf(data=buf3km_100m, color="gray", fill=NA)+
+  geom_sf(data = pts100_10x1km, color = "black") +
+  theme_minimal()
+
+ggplot() +
+  geom_sf(data=buf3km_300m, color="pink",fill=NA) + 
+  geom_sf(data = pts300_10x1km, color = "red") +
+  theme_minimal()
+```
+Lai cik jocīgi tas neizskatītos, jāņem vērā, ka 100m punkti šajā 10x1km kopā ir ļoti daudz (1. attēls), līdz ar to šķiet, ka viss ir pareizi. To apstiprina 2. attēls, kur var labāk redzēt. 
+
+
+## Lauku klātbūtne un īpatsvari, laika mērogošana
+Tagad, mērogojot laiku 10 atkārtojumos, jāaprēķina lauku bloku īpatsvars buferzonā no tās kopējās platības. Tātad, atkal varu izmantot exact_extract() ar argumentu fun="frac". Papildus vien jāieliek laika "microbenchmark" skaitīšanas funkcijā. 
+Kā minēju augstāk, 2.4. uzdevumam mainīju ievades rastru uz klātbūtnes, nevis īpatsvara, kas ļauj iegūt, mauprāt, loģisku rezultātu. 
+
+```{r LADprecenceFrac100m, cache=TRUE}
+uzd2.1laiks=data.frame(microbenchmark(exactextractr::exact_extract(
+  LADklatbutne10, 
+  buf3km_100m, 
+  fun="frac", 
+  append_cols="id"),times=10))
+
+uzd2.2laiks=data.frame(microbenchmark(exactextractr::exact_extract(
+  LADipatsvars100, 
+  buf3km_100m, 
+  fun="frac", 
+  append_cols="id"),times=10))
+
+uzd2.3laiks=data.frame(microbenchmark(
+  {
+  LADklatbutne10frac= exactextractr::exact_extract(
+  LADklatbutne10, 
+  buf3km_300m, 
+  fun="frac", 
+  append_cols="rinda300")
+  frakcijas300k=left_join(buf3km_300m,LADklatbutne10frac,by="rinda300")
+  frakcijas300k_raster <- rasterize(frakcijas300k, ref_rastrs_kartes10Lapas, field = 'frac_1', fun = "mean")
+  writeRaster(frakcijas300k_raster, "LADbin10_3kmbuf_frakc.tif", overwrite = TRUE)
+  }),
+  times=10)
+
+uzd2.4laiks=data.frame(microbenchmark(
+  {
+  LADklatbutne100frac=exactextractr::exact_extract(
+  LADklatbutne100, 
+  buf3km_300m, 
+  fun="frac", 
+  append_cols="rinda300")
+  frakcijas300k2=left_join(buf3km_300m,LADklatbutne100frac,by="rinda300")
+  frakcijas300k2_raster <- rasterize(frakcijas300k2, ref_rastrs_kartes10Lapas, field = 'frac_1', fun = "mean")
+  writeRaster(frakcijas300k2_raster, "LADbin100_3kmbuf_frakc.tif", overwrite = TRUE)
+  }),
+  times=10)
+
+```
+
+# Kāds ir aprēķiniem nepieciešamais laiks katrā no četriem variantiem? Kādas tendences ir saskatāmas?
+```{r laiki.sec, cache=true}
+atrumi1=rbind.data.frame(uzd2.1laiks,uzd2.2laiks)
+atrumi1$sek=atrumi1$time/1e+09
+
+atrumi2=rbind.data.frame(uzd2.3laiks,uzd2.4laiks)
+atrumi2$sek=atrumi2$time/1e+09
+
+par(mfrow = c(2, 1))
+ggplot(atrumi1, aes(expr, sek)) + geom_boxplot()+ 
+      labs(y = "Aprēķinu ātrums (s)", x=element_blank(), title="100 m tīklu centri")+
+  scale_x_discrete(labels=c('lauku klātbūtne 10m šunā (2.1.)', 'lauku īpatsavars 100m šūnā (2.2.)'))+
+  theme_minimal()
+
+ggplot(atrumi2, aes(expr, sek)) + geom_boxplot()+ 
+      labs(y = "Aprēķinu ātrums (s)", x=element_blank(), title="300 m tīklu centri")+
+  scale_x_discrete(labels=c('lauku klātbūtne 10m šunā (2.3.)', 'lauku klātbūtne 100m šūnā (2.4.)'))+
+  theme_minimal()
+
+par(mfrow = c(1, 1))
+```
+
+No pirmā grafika patiesībā ir grūti ko secināt, izņemot, ka gan jau ka izšķirtspēja ir iemesls lēnākiem aprēķiniem (proti, jo lielāka izšķirstpēja, jo vairāk jārēķina). Diez vai palielinātais ātrums 2.2. uzdevumā ir saistīts ar to, ka aprēķini ir attiecināti uz īpatsvaru, nevis klātbūtni.
+
+Savukārt otrais grafiks jau ir balstīts uz viena vieda rastru - klātbūtni, bet atšķiras vien izšķirtspēja. Papildus, ir ierēķināts, cik laika paņem LAD lauka bloku īpatsvara buferzonā aprēķins, šī aprēķina salāgošana ar 100m tīklu, rezultāta rasterizēšana un rastra eksports. 
+
+Tātad, no šī var secināk, ka jo augstāka izšķirtspēja, jo ilgāks aprēķinu laiks, kas ir loģiski.
+
+```{r apskate2.3un2.4., cache=TRUE}
+rastrs2.3=rast("LADbin10_3kmbuf_frakc.tif")
+rastrs2.4=rast("LADbin100_3kmbuf_frakc.tif")
+
+par(mfrow = c(2, 1))
+
+plot(rastrs2.3, main="Lauku klātbūtne 10m šūnā")
+plot(rastrs2.4, main="Lauku klātbūtne 100m šūnā")
+
+par(mfrow = c(1, 1))
+```
+
+## Kādas ir novērotās lauku platības īpatsvara atšķirības? Kādas ir maksimālās teorētiski sagaidāmās atšķirības?
+
+Otrkārt, samazinot izšķirtspēju, teorētiski tiek iegūta vispārīgāka (mazāk precīza) informācija par ainavu, ko ne pārāk labi ilustrē iepriekš demonstrētie attēli, kas balstīti uz 2.3. un 2.4. uzdevumos iegūtajiem rastriem. Rezultāti izskatās gandrīz (vai pat) identiski. Vai tas nozīmē, ka samazinām laika izmaksas, nezaudējot būtisku ekoloģisko informāciju?
+Vēl pie šī domāju, ka samazinot izšķirtspēju, tiek samazināta maksimālā un minimālā gradienta vērtība, jo to izlīdzina blakus esošās šūnas, kas tiek apvienotas vienā, lielākā pikselī. Domāju, ka ir situācijas, kad tas var būt ekoloģiski nozīmīgāk, kā apskatīt ļoti detalizēti, savukārt, tikpat labi, reizēm tas var būt svarīgi. Tā no prakstiskās puses, domāju, ka tas, vai ir vērts ieguldīt ilgu laiku aprēķinos, ir atkarīgs no sugas izplatīšanās spējām.
+
+```{r tiriba2}
+rm(list = ls())
+```
+Man patika šis uzdevums.
