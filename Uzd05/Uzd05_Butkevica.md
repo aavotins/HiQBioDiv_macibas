@@ -1,12 +1,12 @@
 Piektais uzdevums: procesu dalīšana un rezultātu apvienošana
 ================
 Jekaterīna Butkeviča
-2025. gads 23. jūnijs
+2025. gads 29. jūnijs
 
 ## Pakotnes
 
 Izlaboju iepriekšējo kļūdu un pievienoju pārbaudi.
- 
+
 ## Datu sagatavošana
 
 Izlaboju kļūdu 2. uzdevumā, kad netika atlasīti tieši mežaudžu ieraksti.
@@ -302,7 +302,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 21.43 sekundes
+    ## Visu soļu izpildes ilgums: 21.67 sekundes
 
 ## Otrais apakšuzdevums
 
@@ -405,7 +405,7 @@ for (katrs in lapas_sarakasts_celi) {
   lapas_nosaukums <- file_path_sans_ext(basename(katrs))
   fails_nosaukums  <- file.path(output_dir2, paste0(lapas_nosaukums,"mezaudzes_2uzd.parquet"))
   st_write_parquet(apvienots, fails_nosaukums )
-}
+  }
 
 
 
@@ -440,7 +440,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 21 sekundes
+    ## Visu soļu izpildes ilgums: 22.81 sekundes
 
 ## Trešais apakšuzdevums
 
@@ -577,7 +577,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 18.67 sekundes
+    ## Visu soļu izpildes ilgums: 18.74 sekundes
 
 ## Ceturtais apakšuzdevums
 
@@ -680,7 +680,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 17.37 sekundes
+    ## Visu soļu izpildes ilgums: 17.13 sekundes
 
 ## Piektais apakšuzdevums
 
@@ -738,39 +738,64 @@ mana_funkcija_5uzd <- function(mezaudzes) {
 }
 ```
 
-### 5.1. solis
+### 5.1. un 5.2. soļi kopā
 
-Pielietoju *manu_funkciju()*.
+„Pielietoju funkciju `mana_funkcija()` un uzreiz mēru tās izpildes
+laiku.
 
 ``` r
-#mana_funkcija_5uzd(here("3uzd","Output","Data","centra_apvienota.parquet"))
+start_time <- Sys.time()
+mana_funkcija_5uzd(here("3uzd","Output","Data","centra_apvienota.parquet"))
+end_time <- Sys.time()
+cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-Šajā brīdī radās kļūda. Pagaidām iesniegšu darbu tādu, kāds tas ir, lai
-nekavētos un varētu virzīties tālāk, bet, ja būs kādi ieteikumi,
-noteikti papildināšu risinājumu.
+    ## Visu soļu izpildes ilgums: 36.55 sekundes
 
 ## Kopsavilkums
 
 Kopā MVR ierkastu: 462440
 
-1.  Apakšuzdevums izmantojot spatial join lapām ir: 30279, 19510, 32319,
-    24449
+Manuprāt, visveiksmīgākais rezultāts bija, izmantojot funkciju
+`st_intersection`, jo atšķirībā no pārējām pieejām tā nodrošināja
+precīzas vērtības arī malās, nevis radīja tukšas joslas vai joslas ar
+samazinātām vērtībām. Gan `spatial join`, gan `st_filter` gadījumā ir
+redzamas karšu lapu malu problēmas.
 
-Visu soļu izpildes ilgums: 21,46 sekundes
+### 1. apakšuzdevums
 
-2.  Apakšuzdevums izmantojot st_intersection lapām ir: 30279, 19510,
-    32319, 24449, tas sakrīt ar iepriekšējā apakšuzdevuma rezultātiem.
+izmantojot `spatial join` lapām ir: 30279, 19510, 32319, 24449
 
-Visu soļu izpildes ilgums: 23,68 sekundes
+Visu soļu izpildes ilgums: 21,46 sekundes. Malu problēmas ir redzamas.
 
-3.  Apakšuzdevums
+### 2. apakšuzdevums
 
-izmantojot st_filter ar argumentu st_within lapām ir: 29548, 18972,
-31561, 23854. Tas ir mazāk nekā iepriekšējos variantos, jo objekti, kas
-atrodas uz lapu robežām, netika pieskaitīti nevienai no lapām. Visu soļu
+izmantojot `st_intersection` lapām ir: 30279, 19510, 32319, 24449 — tas
+sakrīt ar iepriekšējā apakšuzdevuma rezultātiem.
+
+Visu soļu izpildes ilgums: 23,68 sekundes. Malu vērtības saglabājas
+precīzi.
+
+### 3. apakšuzdevums
+
+izmantojot `st_filter` ar argumentu st_within lapām ir: 29548, 18972,
+31561, 23854. Tas ir mazāk nekā citos variantos, jo objekti, kas atrodas
+uz lapu robežām, netika pieskaitīti nevienai no lapām. Visu soļu
 izpildes ilgums: 23,83 sekundes
 
-4.  Apakšuzdevums
+### 4.apakšuzdevums
 
-Visu soļu izpildes ilgums: 19,12 sekundes
+Visu soļu izpildes ilgums: 19,12 sekundes. Šis variants bija visātrākais
+un bez malu vērību zudumiem. Sanāk, ka veikt darbības visai teritorijai
+uzreiz ir efektīvāk nekā iterēt pa karšu lapām. Turklāt šajā variantā
+neveidojas problēmas ar vērtībām gar lapu malām.
+
+### 5. apakšuzdevums
+
+Visu soļu izpildes ilgums: 43.79 sekundes. Šajā gadījumā arī neveidojas
+problēmas, kas saistītas ar malām.
+
+Kopumā, salīdzinot pieejas, `st_intersection` nodrošina precīzas
+vērtības gar malām, kamēr `spatial join` un `st_filter` malās zaudē
+informāciju. Iterācija pa karšu lapām ir lēnāka un var radīt malu
+problēmas, salīdzinot ar apstrādi visai teritorijai vienlaikus.
