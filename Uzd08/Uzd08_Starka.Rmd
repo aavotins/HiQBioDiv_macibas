@@ -1,0 +1,197 @@
+---
+title: "Uzd08_Starka"
+author: "Rūta Starka"
+date: "2025-06-30"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Sagatavošanās
+Uzdevumam nepieciešamās pakotnes:
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+packages <- c("sf","sfarrow", "terra", "fasterize", "raster")
+missing_packages <- packages[!packages %in% installed.packages()[, "Package"]]
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages)
+}
+lapply(packages, require, character.only = TRUE)
+rm (missing_packages, packages)
+```
+
+Sākotnēji domāju, ka man vispirms man ir jāizveido shape fails no projekta repozitorijā esošā 100m references tīkla geoparquet faila, jo GEE nespēj lasīt vektordatus, kas saglabāti .parquet formātā. Tomēr ņemot vērā, ka shape augšupielāde tomēr prasīja pārāk lielu laiku, atmetu šo pieeju, un nolēmu pie katra uzdevuma soļa lejupielādēt no GGE geoTIF failu, kas izrādītjās daudz ātrāks risinājums. 
+
+Ielasu references tīklu.
+```{r shape, eval=FALSE, cache=TRUE, include=FALSE}
+tikls100_sauszeme=st_read_parquet("../Uzd03/ref_vektordati/tikls100_sauzeme.parquet")
+str(tikls100_sauszeme)
+st_crs(tikls100_sauszeme)#EPSG 3059 --> jāizmanto lejupielādējot no GEE rastrus!
+
+```
+
+# 1.Sentinel-2 2024. g. jūnijam. 
+
+Uzdevumu veicu GEE pārlūkā, izmantojot JavaScript. 
+Šeit mans kods, ar kuru iegūstu sentinel 2 harmonizētos datus 2024. gada jūnijam joslām, kas pieskaras Latvijas teritorijai:
+
+##Uzdevuma 1. daļas GEE kods:
+https://code.earthengine.google.com/7ec261e79d45a2c1511060ce49693757?noload=true 
+
+Pārējo nolēmu darīt R vidē. 
+
+Ielasu R vidē lejupielādētos Sentinel-2 datus, kas filtrēti Latvijas teritorijai (kas pieskaras robežai) 2024. g. jūnijā. 
+```{r s2, echo=TRUE, cache=TRUE}
+s2=rast("1_1_medianRGB.tif")
+plot(s2)
+```
+
+Redzams, ka lejupielādētas visas joslas. Otrs, kas jāizdara - jāapgriež precīzi līdz Latvijas robežām, balstoties uz projektā izmantotā 100m references tīklu. Sākšu ar to. 
+
+```{r s2apgriesana, cache=TRUE, echo=TRUE}
+#pārliecinos, ka koordinātu sistēmas ir vienādas:
+st_crs(s2)#ID["EPSG",3059]]
+st_crs(tikls100_sauszeme)#ID["EPSG",3059]]
+
+#apgriežu s2 rastru līdz tīkla robežām, izmantojot bounding box:
+s2LV=terra::crop(s2,tikls100_sauszeme)
+plot(s2LV)# kā jau bija saigaidāms, ir apgriezies tikai līdz LV galējām robežām
+
+#veicu vērtību aizvietošanu ar terra funkciju mask()
+s2LVr=mask(s2LV,tikls100_sauszeme)
+plot(s2LVr)#ilgi gāja, bet nu tas ir izdevies.
+
+```
+
+Noņemu lieko:
+```{r tirisana}
+rm(s2, s2LV)
+```
+
+Tagad veikšu aprēķinus, par pamatu ņemot šo objektu "s2LVr", izvēloties attiecīgās spektrālās joslas.
+
+## 1.1. Bez mākoņu maskas
+Aprēķināšu mediānu R, G, B (kas attiecīgi ir joslas 'B4', 'B3', 'B2'). 
+
+```{r RGBmediana, cache=TRUE, echo=TRUE}
+#atlasu interesējošās joslas:
+RGB=c("B4", "B3", "B2")
+subset_RGB <- s2LVr[[RGB]]
+
+#aprēķinu mediānu:
+bezMaskas <- app(subset_RGB, fun = median, na.rm = TRUE)
+
+#apskatu
+plot(bezMaskas)
+```
+
+Secinājums: izskatās slikti. Ir skaidri redzamas mākoņainības problēmas visā Latvijas austrumu daļā.
+No tehniskākas puses, redzams, kā satelīts slīpi ir braukājis pāri Latvijai, un Daugavpils apkārtnē vienā vietā pārklājās neliela josla, vizuāli to padarot itkā vēl mākoņaināku.
+
+## 1.2. Ar paraugā doto mākoņu masku.
+Par paraugu uzskatu GEE doto spektrālo joslu QA60 "Cloud mask".
+Apskatu mākoņu masku:
+
+```{r QA60, cache=TRUE, echo=TRUE}
+QA60=s2LVr$QA60
+plot(QA60)
+
+```
+
+Mākoņi ir klasificēti, proti, slānim ir trīs vērtības - "0", jeb nav mākoņu, "512" un "1024", kas ir mākoņu veidi (spalvu vai zemāku atmosfēras slāņu), cik saprotu.
+
+Pēc maskas pielietošanas GEE vidē, ieguvu šādu attēlu:
+
+```{r pecQA60, cache=TRUE, echo=TRUE}
+pecQA60=rast("1_2_pecQA60maskas.tif")
+
+subset_RGB <- pecQA60[[RGB]]
+
+#aprēķinu mediānu:
+pecQA60med <- app(subset_RGB, fun = median, na.rm = TRUE)
+
+#apgriežu pēc bbox
+pecQA60medLVbbox=terra::crop(pecQA60med,tikls100_sauszeme)
+#apgriežu līdz LV robežai pēc tīkla:
+pecQA60medLV=mask(pecQA60medLVbbox,tikls100_sauszeme)
+
+
+#apskatu salīdzinājumā ar 1.1.
+par(mfrow = c(2, 1))
+plot(bezMaskas, main="1.1. Bez mākoņu maskas")
+plot(pecQA60medLV, main="1.2. Pēc QA60 mākoņu maskas")
+par(mfrow = c(1, 1))
+```
+Secinājums: Protams, ka pielietojot mākoņu masku, tiek iegūti attēli ar mazāku mākoņainību, un ir jau daudz labāk, TOMĒR, nav iegūta Latvija pilnīgi bez mākoņiem. Problēmas ir joprojām Latvijas austrumu daļā, kur satelīta joslas pārklājas un vēl nedaudz citviet. Varbūt tieši tur arī ir problēma - mākoņi ir dubultā kārtā un tāpēc tos grūti maskēt? Vajadzētu maskēt vienai joslai, tad otrai joslai, tad pārklāt. Tas būtu precīzāk.
+
+Noņemu liekos objektus:
+```{r tirisana2, warning=FALSE}
+rm(s2LVr, QA60, pecQA60, pecQA60med, pecQA60medLVbbox)
+```
+
+## 1.3. s2cloudless maska
+Svarīgi pieminēt, ka ne vienmēr izdodas veikt s2cloudless maskas palaišanu iekš GEE, jo regulāri (ļoti, ļoti, pārāk bieži) tiek iegūts:
+Tile error: User memory limit exceeded. 
+vai (glabājot kā asset):
+
+vai tuvāk vakaram vienkārši "Page unresponsive"
+
+Te mans pirmais s2cloudless maskas skripts:
+https://code.earthengine.google.com/3809fe835a3233c5758291d149d06cd1?noload=true 
+
+kurš manuprāt, ir kau kur nepariezs, jo rezultāts nav labāks kā QA60 maskai, lai gan pēc teorijas, ņemot vērā, ka tā aprēķinā tiek ņemta arī mākoņu ēna, vajadzēja būt labākam. Tomēr tas bija pietiekami vienkāršs, lai pierunātu GEE to eksportēt.
+
+
+Šo pieeju ņēmu, pārrakstot skriptu no šeit piedāvātā piemēra:
+https://developers.google.com/earth-engine/tutorials/community/sentinel-2-s2cloudless 
+
+Nevis šī turpat atrodamā javascript piemēra (https://code.earthengine.google.com/?scriptPath=Examples%3ACloud%20Masking%2FSentinel2%20Cloud%20And%20Shadow), kas manuprāt ir pareizs, bet diemžēl pārāk smags.
+
+
+Katrā ziņā šeit apskatāma GEE izveidotā s2cloudless maska: 
+```{r S2cloudlessMASKA, cache=TRUE, echo=TRUE}
+pecS2cloudless=rast("1_3_pecS2cloudles.tif")
+names(pecS2cloudless)
+plot(pecS2cloudless$cloudmask)
+```
+s2cloudless maskā, mākoņu ēnas tiek identificētas uz virsmas pēc pikseļu tumšuma (josla "dark_pixels", kas aprēķināta no B8 joslas), ņemot vērā mākoņa ēnas projekcijas virzienu un attālumu (josla "could_transform"), tā aprēķinot varbūtību, ka tumšais pikselis reāli ir mākoņa ēna, nevis ūdens. Pēc tam no mozaīkas tiek izņemti mākoņu-ēnu laukumiņi un izlīdzināti ar 20m precizitātes buferi. Tādējādi tiek iegūta ēnu maska ("cloudmask") ar vērtībām 1 = mākoņi un ēnas, un 0 = nav mākoņu un ēnu. Īsti nesaprotu, kas ir 0.5. 
+
+Pielietošu masku:
+
+```{r pecS2cloudles, cache=TRUE, echo=TRUE}
+subset_RGB <- pecS2cloudless[[RGB]]
+
+#aprēķinu mediānu:
+pecS2cloudlessMED <- app(subset_RGB, fun = median, na.rm = TRUE)
+
+#apgriežu pēc bbox
+pecS2cloudlessMEDbbox=terra::crop(pecS2cloudlessMED,tikls100_sauszeme)
+
+#apgriežu līdz LV robežai pēc tīkla:
+pecS2cloudlessMedLV=mask(pecS2cloudlessMEDbbox,tikls100_sauszeme)
+
+#apskatu salīdzinājumā ar 1.1. un 1.2.
+par(mfrow = c(1, 3))
+plot(bezMaskas, main="1.1. Bez mākoņu maskas")
+plot(pecQA60medLV, main="1.2. Pēc QA60 mākoņu maskas")
+plot(pecS2cloudlessMedLV, main="1.3. Pēc s2cloudless mākoņu maskas")
+par(mfrow = c(1, 1))
+```
+
+
+Secinājums: šī maska pēc teorijas ir daudz precīzāka - tā ņem ne tikai pašus mākoņus (s2 cloud probability), bet arī to ēnas uz Zemes virsmas (s2 surface reflectance). Tā ir galvenā atšķirība no QA60 maskas, kas ņem tikai pašus mākoņus. 
+
+# 2. daļa - NDVI aprēķini
+Apsveru izmantot rgee, jo darboties caur GEE ar s2cloudless masku vienkārši nav prouktīvi, jo lielāko daļu laika sanāk cerēt, ka "šoreiz beidzt saies" (grūti bija izturēt atmiņas ierobežojumus GEE api).
+
+# RGEE
+
+Instalēju pakotni (un arī "sf", kas jau ir instalēta, bet atkārtojamībai ievietoju):
+```{r instalRgee, cache=TRUE, message=FALSE, warning=FALSE, results='hide'}
+#install.packages("sf") #---> ja nepieciešams
+install.packages("remotes")
+remotes::install_github("r-spatial/rgee")
+```
+
+*TURPINĀJUMS SEKOS*
