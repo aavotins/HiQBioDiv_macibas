@@ -1,0 +1,340 @@
+---
+title: "Uzd4_Sakele"
+author: "Vita"
+date: "2025-01-27"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r warning=FALSE, cache=TRUE, results='hide'}
+
+if (!require("sf")) install.packages("sf")
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("RCurl")) install.packages("RCurl")
+if (!require("archive")) install.packages("archive")
+if (!require("sfarrow")) install.packages("sfarrow")
+if (!require("raster")) install.packages("raster")
+if (!require("fasterize")) install.packages("fasterize")
+#if (!require("terra")) install.packages("terra")
+if (!require("tools")) install.packages("tools")
+library(tools)
+if (!require("foreach")) install.packages("foreach")
+if (!require("doParallel")) install.packages("doParallel")
+if (!require("bigparallelr")) install.packages("bigparallelr")
+
+
+
+
+# alternative
+#if (!require("pacman")) install.packages("pacman")
+#pacman::p_load(sf, tidyverse, RCurl, archive, sfarrow, raster, fasterize)
+
+```
+
+## Meža dati
+```{r warning=FALSE, cache=TRUE, results='hide'}
+if (!dir.exists("data/download")) {
+  dir.create("data/download", recursive=TRUE)
+  }
+
+url= "https://data.gov.lv/dati/lv/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92/resource/392dfb67-eeeb-43c2-b082-35f9cf986128/download/centra.7z"
+
+destfile = "data/download/centra.7z"
+
+download.file(url=url, destfile = destfile, mode='wb')
+
+
+
+if (!dir.exists("data/VMD")) {
+  dir.create("data/VMD")
+}
+archive_extract(destfile, dir = "data/VMD")
+
+
+
+if (!dir.exists("data/VMD/merged")) {
+  dir.create("data/VMD/merged")
+}
+ 
+file_list <- list.files("data/VMD", pattern = "*shp$", full.names = TRUE)
+shapefile_list <- lapply(file_list, read_sf) #ielasa visus failus
+centra_shp <- do.call(rbind, shapefile_list) # apvieno vienā failā
+
+st_write_parquet(centra_shp, "data/VMD/merged/centra.parquet") # ieraksta apvienoto failu, kā parquet uz diska
+
+rm(centra_shp, shapefile_list) #iztīrīt atmiņu
+
+centra_parq<- st_read_parquet("data/VMD/merged/centra.parquet")
+
+
+# Pārbaudīt, vai visas ģeometrijas ir MULTIPOLYGON
+if(all(st_geometry_type(centra_parq) == "MULTIPOLYGON")) {
+  print("Visas ģeometrijas ir MULTIPOLYGON")
+} else {
+  print("Dažas ģeometrijas nav MULTIPOLYGON")
+  }
+
+# Pārbaudīt, vai nav tukšu ģeometriju
+if(any(st_is_empty(centra_parq))) {
+  print("Slānī ir tukšas ģeometrijas")
+  # Izdzēst tukšās ģeometrijas
+  centra_parq <- centra_parq[!st_is_empty(centra_parq), ] 
+}
+
+# Pārbaudīt, vai nav kļūdainu ģeometriju
+if(any(!st_is_valid(centra_parq))) {
+  print("Slānī ir kļūdainas ģeometrijas")
+  # Salabot un izdzēst kļūdainās ģeometrijas
+  centra_parq <- st_make_valid(centra_parq)
+  print("ir validētas")
+  centra_parq <- centra_parq[st_is_valid(centra_parq), ] 
+}
+
+
+if (!dir.exists("data/VMD/merged/validated")) {
+  dir.create("data/VMD/merged/validated")
+}
+
+
+st_write_parquet(centra_parq, "data/VMD/merged/validated/centra_parq.parquet")
+rm(centra_parq)
+
+```
+
+## References rastri
+
+```{r warning=FALSE, cache=TRUE, results='hide'}
+if (!dir.exists("data/reference_raster")) {
+  dir.create("data/reference_raster")
+}
+
+url= "https://zenodo.org/records/14497070/files/LV10m_10km.tif?download=1"
+destfile = "data/reference_raster/LV10m_10km.tif"
+download.file(url=url, destfile = destfile, mode='wb')
+rm(url, destfile)
+
+url= "https://zenodo.org/records/14497070/files/LV100m_10km.tif?download=1"
+destfile = "data/reference_raster/LV100m_10km.tif"
+download.file(url=url, destfile = destfile, mode='wb')
+rm(url, destfile)
+
+```
+
+## Mana funkcija
+```{r warning=FALSE, cache=TRUE}
+mana_funkcija1<-function(input_file){
+  
+  
+  output_dir<-"data/VMD/tifs"
+  input_basename <- file_path_sans_ext(basename(input_file)) # Noņem paplašinājumu
+  output_file <- file.path(output_dir, paste0(input_basename, ".tif"))
+  
+ 
+  data <- st_read_parquet(input_file)
+  data<-data%>%
+    filter(zkat=="10"& s10=="1") #tikai priedes
+  
+  
+  raster_10m_10km = raster("data/reference_raster/LV10m_10km.tif")
+  raster_100m_10km = raster("data/reference_raster/LV100m_10km.tif")
+  
+
+
+  forest_raster_10m <- fasterize(data, raster_10m_10km, background = 0)
+  forest_raster_10m[is.na(raster_10m_10km)] <- NA
+  
+  forest_raster_100m <- aggregate(forest_raster_10m, fact = 10, fun = mean)
+  #forest_raster_100m_res <- resample(forest_raster_100m, raster_100m_10km, method = "bilinear")
+  
+  
+  forest_raster_100m_res <- resample(forest_raster_100m, raster_100m_10km, 
+                                     method = "bilinear",
+                                     filename=output_file,
+                                     overwrite=TRUE)
+  return(TRUE)
+
+
+#  writeRaster(forest_raster_100m_res, output_file, format = "GTiff", overwrite = TRUE)
+  
+}
+
+```
+
+
+## Mana funkcija tikai ar samazinātu teritoriju
+Tā kā nevienu reizi neizdevās izpildīt `mana_funkcija()`, tad izveidoju funkciju, kas dara to pašu, bet tikai izmanto apgrieztu rastru, kas atbilst teritorijai parquet failā.
+
+```{r warning=FALSE, cache=TRUE}
+mana_funkcija<-function(input_file){
+  
+  
+  output_dir<-"data/VMD/tifs"
+  input_basename <- file_path_sans_ext(basename(input_file)) # Noņem paplašinājumu
+  output_file <- file.path(output_dir, paste0(input_basename, ".tif"))
+  
+ 
+  data <- st_read_parquet(input_file)
+  data<-data%>%
+    filter(zkat=="10"& s10=="1") #tikai priedes
+  #print(head(data, 20))
+  
+  raster_10m_10km = raster("data/reference_raster/LV10m_10km.tif")
+  raster_100m_10km = raster("data/reference_raster/LV100m_10km.tif")
+  #plot(raster_100m_10km)
+
+  raster_10m_10km_cropped = terra::crop(raster_10m_10km,data)
+  raster_100m_10km_cropped = terra::crop(raster_100m_10km,data)
+  
+  #plot(raster_100m_10km_cropped)  # apgrieztais apgabals
+  
+  raster_10m_10km_cropped1=raster::raster(raster_10m_10km_cropped)
+  #plot(raster_100m_10km_cropped)
+  
+  forest_raster_10m <- fasterize(data, raster_10m_10km_cropped1, background = 0)
+  #plot(forest_raster_10m) #ok
+  
+  forest_raster_10m[is.na(raster_10m_10km_cropped)] <- NA
+  #plot(forest_raster_10m) #ok
+  
+  
+  forest_raster_100m <- aggregate(forest_raster_10m, fact = 10, fun = mean)
+  #plot(forest_raster_100m)
+  
+  #forest_raster_100m_res <- resample(forest_raster_100m, raster_100m_10km, method = "bilinear")
+  #plot(forest_raster_100m_res)
+  
+  forest_raster_100m_res <- resample(forest_raster_100m, raster_100m_10km, 
+                                    method = "bilinear",
+                                   filename=output_file,
+                                  overwrite=TRUE)
+  
+   return(TRUE)
+
+}
+
+```
+
+
+## Viens liels parquet
+```{r warning=FALSE, cache=TRUE}
+
+input_file <- "data/VMD/merged/validated/centra_parq.parquet"
+
+time1 <- system.time(mana_funkcija(input_file))
+print(time1)
+```
+
+Ar brīviem 10.5 GB atmiņas nepietika (Error: std::bad_alloc). Kamēr pietika (Timing stopped at: 546.5 268.9 878.1),izmantoja 1-2 kodolus. 
+
+Apgrieztajā variantā izmanto vienu kodolu un max 9.5 GB RAM, izpilde bija ~5,5 min.
+
+user  system elapsed 
+ 276.62   36.21  320.39
+
+## Daudzi parquet secīgi
+```{r warning=FALSE, cache=TRUE, results='hide'}
+# visu parquet uztaisīšana
+
+if (!dir.exists("data/VMD/parquets")) {
+  dir.create("data/VMD/parquets")
+}
+
+
+input_file_list <- list.files("data/VMD", pattern = "*shp$", full.names = TRUE)
+print(input_file_list)
+
+conv_to_parquet <- function(input_file) {
+  
+  file <- st_read(input_file)
+  input_basename <- file_path_sans_ext(basename(input_file))
+  output_file <- file.path("data/VMD/parquets",paste0(input_basename, ".parquet"))
+  st_write_parquet(file,output_file)
+}
+
+
+for (file in input_file_list) {
+  conv_to_parquet(file)
+}
+```
+
+
+```{r warning=FALSE, cache=TRUE}
+# katra parquet secīga apstrāde
+
+list_parquets <- list.files("data/VMD/parquets", pattern = "\\.parquet$", full.names = TRUE)
+
+dir_tifs <- "data/VMD/tifs"
+dir.create(dir_tifs, recursive = TRUE)
+
+
+time2<-system.time(
+  for (prq in list_parquets) {
+    mana_funkcija(prq)
+  }
+  )
+
+print(time2)
+```
+Pilnajā variantā ar brīviem 11GB atmiņas nepietiek. Beidzas ar Error: std::bad_alloc
+
+Ar apgrieztu teritoriju pietiek ar 10 GB RAM (izmanto praktiski gandrīz visu pieejamo atmiņu, bet ar to pietiek), izmanto 1-2 kodolus. Izpilde aizņem ~ 7,5 min.
+
+   user  system elapsed 
+ 324.86   71.94  439.81 
+
+## Daudzi parquet paralēli ar vienu kodolu
+```{r warning=FALSE, cache=TRUE}
+
+cl1 <- makeCluster(1) 
+registerDoParallel(cl1)
+
+list_parquets <- list.files("data/VMD/parquets", pattern = "\\.parquet$", full.names = TRUE)
+
+time3 <- system.time({
+  foreach(prq = list_parquets,
+          .packages = c("raster", "fasterize", "sf", "sfarrow", "tools", "dplyr")) %dopar% {
+          mana_funkcija(prq)
+  }
+})
+
+print(time3)
+stopCluster(cl1)
+
+
+```
+Ar pilno teritoriju daudz biežāk novērojama strauja atmiņas atbrīvošana. Pieaugot tās patēriņam vispirms pieaug arī CPU izmantošana, bet viena kodola ietvaros. Pēc tam krīt atpakaļ, bet atmiņas patēriņš saglabājas augsts kādu laiku un pēc tam krīt. Bet tif fails tā arī pa to laiku netiek uztaisīts. Atmiņas patēriņa grafiks izskatās pēc zāģa zobiem. Pēc vairāk kā 30 min funkcija ir manuāli apturēta, jo reuzltāts nav sasniegts.
+
+Apgrieztajā  - viens kodols, max 9.5 GB RAM un 8 min. Rodas iepaids par vienmērīgāku atmiņas izmantošanu, nekā pilnajā versijā, nav tādi strauji kāpumi kritumi. Intuitīvi šķiet, ka atbilda iterācijām for ciklā. Atmiņas patēriņš izskatās drīzāk pēc sinusoīdas. 
+  
+  user  system elapsed 
+  0.60    0.55  479.03 
+
+## Daudzi parquet paralēli ar vairākiem kodoliem (3)
+```{r warning=FALSE, cache=TRUE}
+
+num_cores <- nb_cores() - 1  
+cl2 <- makeCluster(num_cores)
+registerDoParallel(cl2)
+list_parquets <- list.files("data/VMD/parquets", pattern = "\\.parquet$", full.names = TRUE)
+
+time4 <- system.time({
+  foreach(prq = list_parquets,
+          .packages = c("raster", "fasterize", "sf", "sfarrow", "tools", "dplyr")) %dopar% {
+          mana_funkcija(prq)
+  }
+})
+
+print(time4)
+stopCluster(cl2)
+
+
+```
+
+Apgrieztajā pamatā izmanto 2 kodolus. Izmantoja maksimāli pieejamo atmiņu 10 GB RAM, bet ar to pietika. Apstrāde notika visātrāk ~ 4,5 min.
+  user  system elapsed 
+  0.55    0.48  260.39 
+
+Pilnajā versijā pēc 4,5 min pietrūka atmiņa. 
