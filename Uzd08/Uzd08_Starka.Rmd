@@ -10,9 +10,10 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Sagatavošanās
+
 Uzdevumam nepieciešamās pakotnes:
 ```{r packages, message=FALSE, warning=FALSE, results='hide'}
-packages <- c("sf","sfarrow", "terra", "fasterize", "raster")
+packages <- c("sf","sfarrow", "terra", "fasterize", "raster", "doParallel", "ggplot2", "smoothr","tools")
 missing_packages <- packages[!packages %in% installed.packages()[, "Package"]]
 if (length(missing_packages) > 0) {
   install.packages(missing_packages)
@@ -21,25 +22,123 @@ lapply(packages, require, character.only = TRUE)
 rm (missing_packages, packages)
 ```
 
-Sākotnēji domāju, ka man vispirms man ir jāizveido shape fails no projekta repozitorijā esošā 100m references tīkla geoparquet faila, jo GEE nespēj lasīt vektordatus, kas saglabāti .parquet formātā. Tomēr ņemot vērā, ka shape augšupielāde tomēr prasīja pārāk lielu laiku, atmetu šo pieeju, un nolēmu pie katra uzdevuma soļa lejupielādēt no GGE geoTIF failu, kas izrādītjās daudz ātrāks risinājums. 
+Sākotnēji domāju, ka man vispirms man ir jāizveido shape fails no projekta repozitorijā esošā 100m references tīkla geoparquet faila, jo GEE nespēj lasīt vektordatus, kas saglabāti .parquet formātā. Tomēr ņemot vērā, ka shape augšupielāde tomēr prasīja pārāk lielu laiku, atmetu šo pieeju, un nolēmu pie katra uzdevuma soļa lejupielādēt no GGE geoTIF failu, kas izrādītjās daudz ātrāks risinājums (līdz brīdim, kad sasniedzu 1.3. uzdevumu). 
 
 Ielasu references tīklu.
-```{r shape, eval=FALSE, cache=TRUE, include=FALSE}
+```{r shape, eval=FALSE, cache=TRUE}
 tikls100_sauszeme=st_read_parquet("../Uzd03/ref_vektordati/tikls100_sauzeme.parquet")
 str(tikls100_sauszeme)
 st_crs(tikls100_sauszeme)#EPSG 3059 --> jāizmanto lejupielādējot no GEE rastrus!
 
 ```
 
-# 1.Sentinel-2 2024. g. jūnijam. 
+Ņemot vērā, ka 1.3. uzdevumā, no kura veiksmīgas izpildes arī atkarīgs pārējais uzdevums un vispār EGV sagatavošana nākotnē, bija jāpieņem kāds risinājums, lai cīnītos ar GEE atmiņas ierobežojumiem. Pieņēmu Jāņa Ozola ideju par Latvijas sadalīšanu 50km kvadrātos un uzdevumu izpildi GEE uz katru no tiem, pēcāk lejupielādētos tif failus salīmējot R vidē (kā mācījāmies 5. uzdevumā). 
 
-Uzdevumu veicu GEE pārlūkā, izmantojot JavaScript. 
-Šeit mans kods, ar kuru iegūstu sentinel 2 harmonizētos datus 2024. gada jūnijam joslām, kas pieskaras Latvijas teritorijai:
+```{r tks50km, cahce=TRUE}
+tks93_50km=st_read_parquet("../Uzd03/ref_vektordati/tks93_50km.parquet")
+unique(tks93_50km$NOSAUKUMS)# ir 131 50km kvadrāti
+plot(tks93_50km)
+```
+Ņemot vērā, ka šie 50km kvadrāti tomēr ir ļoti mazi (kopā 131), un negribu tik daudz manuālu darbu, salīmēšu vairākus kvadrātus kopā, balstoties uz lauku "NUMURS". Izvilkšu no numuriem pirmos divus ciparus, ko pēc tam izmantošu, lai apvienotu 50km kvadrātus lielākās "flīzēs", kas cerams būs pietiekami mazas GEE darbu veikšanai. 
+
+```{r flizes, cache=TRUE}
+#izveidoju jaunu lauku "n2", kas satur pirmos divus skaitļus no katra kartes lapas numura
+tks93_50km$n2 <- as.numeric(substr(as.character(tks93_50km$NUMURS), 1, 2))
+unique(tks93_50km$n2)# ieguvu 15 kopas ar kvadrātiem
+# 53 52 54 44 41 42 43 45 31 32 33 34 35 24 25
+
+#izveidoju direktoriju shp failiem
+dir.create("tks93_50km_UNIONflizes_shp", showWarnings = FALSE)
+
+#iestatu darbu uz 2 kodoliem
+cl <- makeCluster(2)
+registerDoParallel(cl)
+
+#izdalu unikālās vērtības no lauka n2, saukšu tās par flīzēm, jo ir vasara
+n2_flizes <- unique(tks93_50km$n2)
+
+
+#veidoju foreach ciklu shp izveidei, balsoties uz katru unikālo vērtību laukā n2
+foreach(val = n2_flizes, .packages = "sf") %dopar% {
+  # Subseti
+  subset_sf <- tks93_50km[tks93_50km$n2 == val, ]
+  
+  #sapludinu ģeometrijas, lai vienkāršotu
+  subset_union <- st_union(subset_sf)
+  
+  #nodrošinu simple feature formātu
+  subset_union_sf <- st_sf(geometry = subset_union) 
+  
+  # nosaukumi
+  filename <- sprintf("tks93_50km_UNIONflizes_shp/tks93_50km_kv_%s.shp", val)
+
+  # rakstam
+  st_write(subset_union_sf, filename, delete_layer = TRUE, quiet = TRUE)
+}
+
+# atiestatu kodolus
+stopCluster(cl)
+
+```
+Tas notika apbrīnojami ātri, pāris sekundēs, un esmu apmierināta.
+
+
+Tagad šos shp augšupielādēšu GEE kā assets. 
+
+## GEE assets linki
+Te 15 linki katram assetam, ko izveidoju (15 kartes "flīzes" Latvijai, shp formātā, kam citādi ir tādas pašas īpašības kā projekta zenodo direktorijā atrodamajiem shp failiem)
+1) kv24 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_24UNION
+2) kv25 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_25UNION
+3) kv31 -  https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_31UNION
+4) kv32 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_32UNION
+5) kv33 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_33UNION
+6) kv34 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_34UNION
+7) kv35 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_35UNION
+8) kv41 -  https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_41UNION
+9) kv42 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_42UNION
+10) kv43 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_43UNION
+11) kv44 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_44UNION 
+12) kv45 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_45UNION 
+13) kv52 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_52UNION 
+14) kv53 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_53UNION
+15) kv54 - https://code.earthengine.google.co.in/?asset=projects/ee-rr11031/assets/tks93_50km_kv_54UNION 
+
+Šo izmantošu 1.3. un 2.1., 2.2. un 2.3. uzdevumiem, bet 1.1. nu 1.2. uzdevumam šis nav nepieciešams, jo viss notiek arī bez Latvijas sadalīšanas kvadrātos.
+
+Papildus, izveidošu Latvijas teritorijas perimetra slāni un perimetru ar 10km buferi, ko līdzīgiem nolūkiem arī augšupielādēšu GEE kā assetus, domāju, ka saimniecībā noderēs.
+```{r LVperimetrs, cache=TRUE}
+# apvienoju vienā ģeometrijā kā poligonu:
+tikls100_sauszeme=st_read_parquet("../Uzd03/ref_vektordati/tikls100_sauzeme.parquet")
+tikls_union <- st_union(tikls100_sauszeme)
+
+# apskatu
+ggplot() +
+  geom_sf(data = tikls_union, size = 1) +
+  theme_minimal() 
+
+# izskatās viss labi, rakstu kā shp failus
+dir.create("LVperimetrs_shp", showWarnings = FALSE)
+out_dir <- "LVperimetrs_shp"
+st_write(tikls_union, file.path(out_dir, "tikls100_UNIONpolygon.shp"), delete_dsn = TRUE)
+
+```
+
+Linki uz LV robežu kā GEE assets:
+16) Latvija kā poligons - https://code.earthengine.google.com/?asset=projects/ee-rr11031/assets/tikls100_UNIONpolygon 
+
+
+Noņemu lieko:
+```{r tirisana1}
+rm(list = setdiff(ls(), "tikls100_sauszeme", "tikls_union"))
+```
+
+
+Tālāk uzdevumu veicu GEE pārlūkā, izmantojot JavaScript, gan pamīšu šeit R.
+
 
 ##Uzdevuma 1. daļas GEE kods:
-https://code.earthengine.google.com/7ec261e79d45a2c1511060ce49693757?noload=true 
-
-Pārējo nolēmu darīt R vidē. 
+Šeit mans kods, ar kuru iegūstu sentinel 2 harmonizētos datus 2024. gada jūnijam joslām, kas pieskaras Latvijas teritorijai: 
+https://code.earthengine.google.co.in/cb2a435e8b8950583694ad2388ebe591?noload=true 
 
 Ielasu R vidē lejupielādētos Sentinel-2 datus, kas filtrēti Latvijas teritorijai (kas pieskaras robežai) 2024. g. jūnijā. 
 ```{r s2, echo=TRUE, cache=TRUE}
@@ -65,7 +164,7 @@ plot(s2LVr)#ilgi gāja, bet nu tas ir izdevies.
 ```
 
 Noņemu lieko:
-```{r tirisana}
+```{r tirisana2}
 rm(s2, s2LV)
 ```
 
@@ -126,72 +225,339 @@ par(mfrow = c(1, 1))
 Secinājums: Protams, ka pielietojot mākoņu masku, tiek iegūti attēli ar mazāku mākoņainību, un ir jau daudz labāk, TOMĒR, nav iegūta Latvija pilnīgi bez mākoņiem. Problēmas ir joprojām Latvijas austrumu daļā, kur satelīta joslas pārklājas un vēl nedaudz citviet. Varbūt tieši tur arī ir problēma - mākoņi ir dubultā kārtā un tāpēc tos grūti maskēt? Vajadzētu maskēt vienai joslai, tad otrai joslai, tad pārklāt. Tas būtu precīzāk.
 
 Noņemu liekos objektus:
-```{r tirisana2, warning=FALSE}
-rm(s2LVr, QA60, pecQA60, pecQA60med, pecQA60medLVbbox)
+```{r tirisana3, warning=FALSE}
+rm(list = setdiff(ls(), c("bezMaskas", "pecQA60medLV", "tikls100_sauszeme")))
 ```
 
 ## 1.3. s2cloudless maska
-Svarīgi pieminēt, ka ne vienmēr izdodas veikt s2cloudless maskas palaišanu iekš GEE, jo regulāri (ļoti, ļoti, pārāk bieži) tiek iegūts:
-Tile error: User memory limit exceeded. 
-vai (glabājot kā asset):
+šo uzdevumu veicu GEE vidē, veidot aprēķinus katrai no 15 Latvijas kartes lapām, ko izveidoju augstāk, un saglabāju kā assets savā GEE kontā. 
 
-vai tuvāk vakaram vienkārši "Page unresponsive"
+Visus lejupielādētos tif failus sagalabāju tam paredzētā apakšuzdevuma folderī.
 
-Te mans pirmais s2cloudless maskas skripts:
-https://code.earthengine.google.com/3809fe835a3233c5758291d149d06cd1?noload=true 
+Lejupielādētos rastrus tagad ir kā sarakstu jāielasa un tad jāsalīmē. Jāņem vērā, ka pareizas salīmēšanas mērķiem, esmu GEE iekļāvusi katram 2km buferi. 
 
-kurš manuprāt, ir kau kur nepariezs, jo rezultāts nav labāks kā QA60 maskai, lai gan pēc teorijas, ņemot vērā, ka tā aprēķinā tiek ņemta arī mākoņu ēna, vajadzēja būt labākam. Tomēr tas bija pietiekami vienkāršs, lai pierunātu GEE to eksportēt.
-
-
-Šo pieeju ņēmu, pārrakstot skriptu no šeit piedāvātā piemēra:
-https://developers.google.com/earth-engine/tutorials/community/sentinel-2-s2cloudless 
-
-Nevis šī turpat atrodamā javascript piemēra (https://code.earthengine.google.com/?scriptPath=Examples%3ACloud%20Masking%2FSentinel2%20Cloud%20And%20Shadow), kas manuprāt ir pareizs, bet diemžēl pārāk smags.
-
-
-Katrā ziņā šeit apskatāma GEE izveidotā s2cloudless maska: 
-```{r S2cloudlessMASKA, cache=TRUE, echo=TRUE}
-pecS2cloudless=rast("1_3_pecS2cloudles.tif")
-names(pecS2cloudless)
-plot(pecS2cloudless$cloudmask)
+```{r saraksts13, cache=TRUE}
+output_dir <- "./rastri_1_3uzd/"
+rastru_saraksts <- list.files(output_dir, pattern = ".tif$", full.names = TRUE)
+print(rastru_saraksts)# apskatu failu nosaukumus, tur viss ok, ir visi 15 rastri.
 ```
-s2cloudless maskā, mākoņu ēnas tiek identificētas uz virsmas pēc pikseļu tumšuma (josla "dark_pixels", kas aprēķināta no B8 joslas), ņemot vērā mākoņa ēnas projekcijas virzienu un attālumu (josla "could_transform"), tā aprēķinot varbūtību, ka tumšais pikselis reāli ir mākoņa ēna, nevis ūdens. Pēc tam no mozaīkas tiek izņemti mākoņu-ēnu laukumiņi un izlīdzināti ar 20m precizitātes buferi. Tādējādi tiek iegūta ēnu maska ("cloudmask") ar vērtībām 1 = mākoņi un ēnas, un 0 = nav mākoņu un ēnu. Īsti nesaprotu, kas ir 0.5. 
+Apskatu vienu
+```{r kv31, cache=TRUE}
+kv31=rast("./rastri_1_3uzd/1_3_pecS2maskas_kv31.tif")
+plot(kv31)
 
-Pielietošu masku:
+#atlasu interesējošās joslas:
+RGB=c("B4_median", "B3_median", "B2_median")
+subset_RGB <- kv31[[RGB]]
 
-```{r pecS2cloudles, cache=TRUE, echo=TRUE}
+#aprēķinu mediānu:
+kv31med <- app(subset_RGB, fun = median)
+
+#apskatu
+plot(kv31med)
+```
+Jā, tas ir vajadzīgais rezultāts.
+
+Tagad tikai jāizdomā, ko darīt pirmo - apvienošanu vai mediānas aprēķinu. Likās, ka ātrāk varētu būt sākumā ciklā rēķināt mediānas, un pēc tam tikai apvienot.
+
+Tagad rastru sarakstam:
+1) aprēķināšu katram mediānu
+```{r medianasSARAKSTAM, cache=TRUE}
+#izveidoju direktoriju medianu failiem
+dir.create("tks93_50km_RGBmedianas", showWarnings = FALSE)
+
+#saraksts
+rastru_saraksts <- list.files("./rastri_1_3uzd/", pattern = ".tif$", full.names = TRUE)
+
+# interesējošās joslas
+RGB <- c("B4_median", "B3_median", "B2_median")
+
+#optimizēju atmiņu
+terraOptions(memfrac = 0.5)
+
+cl <- makeCluster(2)
+registerDoParallel(cl)
+
+#cikls
+results <- foreach(f = rastru_saraksts, .packages = c("terra", "tools"), .export = "RGB") %dopar% {
+  r <- rast(f)
+  subset_RGB <- r[[RGB]]
+
+  r_median <- app(subset_RGB, fun = median)
+
+  base_name <- file_path_sans_ext(basename(f))
+  out_path <- file.path("tks93_50km_RGBmedianas", paste0(base_name, "_RGBmed.tif"))
+
+  writeRaster(r_median, out_path, overwrite = TRUE)
+  
+  # Explicit garbage collection
+  gc()
+  
+  return(out_path)
+}
+
+stopCluster(cl)
+
+print(results)
+```
+Nu, kādas padsmit minūtes pagāja 15 failiem, varbūt nedaudz mazāk.
+
+Tagad:
+2) modificēšu apvienošanas funkciju, ko izveidoju 5. uzdevumā, kas ar mosaic() apvieno rastrus, ņemot mediānās pikseļu vērtības to pārklāšanās vietās.
+```{r apvienosana13funkcija, cache=TRUE}
+output_dir <- "./tks93_50km_RGBmedianas/"
+median_files <- list.files(output_dir, pattern = ".tif$", full.names = TRUE)
+print(median_files)# apskatu failu nosaukumus, tur viss ok, ir visi 15 rastri.
+
+
+apvienosanas_funkcija=function(median_files){
+    library(terra)
+    #ielasu visus rastrus ar rast()
+    rastru_objekti <- lapply(median_files, rast)
+    
+    #pakļauju katru no saraksta rastriem funkcijai mosaic(), ar funkciju "median", jeb, ka tiek paņemta mediānā pikseļa vērtība gadījumā, ja pikseļi pārklājas (bet ja ņemtu "min" vai "max", tam šajā gadījumā nevajadzētu mainīt rezultātu)
+    mozaika <- do.call(mosaic, c(rastru_objekti, list(fun = "median")))
+    
+    #apgriežu līdz tikls100sauszeme
+    mozaika_crop <- crop(mozaika, tikls100_sauszeme)
+    
+    #maskēju
+    mozaika_masked <- mask(mozaika_crop, tikls100_sauszeme)
+
+    # Saglabāju apvienoto rastru mozaīku
+    output_path <- "../Uzd08/1_3_s2cloudless_Mozaika.tif"
+    writeRaster(mozaika_masked, output_path, overwrite = TRUE)
+  }
+
+#palaižu šo funkciju un izmēru, cik laika tā prasa, jo tālāk kaut kas tāds jādara ar lielākiem datiem 2. uzdevuma daļā. 
+apvienosanas_laiks2=system.time({
+  apvienosanas_funkcija(median_files)
+})
+
+print(apvienosanas_laiks2)
+```
+Šis gan bija diezgan ilgi - apmēram 35 minūtes. 
+
+Alternatīvi varētu izmantot objekta "tks93_50km" lauku "n2", lai apgrieztu katru kartes lapu ar funkciju "clip", un tad veikt salīmēšanu. Bet tas būtu ne tik droši? Teorētiski jau priblēmām nevajadzētu būt, jo sekoju līdzi koordinātu sistēmām, bet labāk neriskēt.
+
+Tagad
+3) ielasu izveidoto mozaīku kā jaunu objektu, un tālāk veicu analogas darbības 1.1. un 1.2. uzdevumiem - apgriešanu līdz 100m references tīkla robežām (jo GEE vidē biju uzlikusi 2km buferi, kas teritorijām pie LV robežas joprojām tur ir) un vizualizēšanu, lai salīdzinātu ar 1.1. un 1.2. rezultātu.
+
+```{r pecS2cloudless, cache=TRUE, echo=TRUE}
+pecS2cloudless=rast("1_3_s2cloudless_Mozaika.tif")
+plot(pecS2cloudless)
+
 subset_RGB <- pecS2cloudless[[RGB]]
 
 #aprēķinu mediānu:
-pecS2cloudlessMED <- app(subset_RGB, fun = median, na.rm = TRUE)
+pecS2cloudless_med <- app(subset_RGB, fun = median, na.rm = TRUE)
 
-#apgriežu pēc bbox
-pecS2cloudlessMEDbbox=terra::crop(pecS2cloudlessMED,tikls100_sauszeme)
+#apgriežu pēc bbox ---> vai vajag? Pati domāju, ka nevajag, jo šoreiz GEE biju precīzāk definājusi teritoriju
+pecS2cloudless_medLVbbox=terra::crop(pecS2cloudless_med,tikls100_sauszeme)
+#apgriežu līdz LV robežai pēc tīkla: 
+pecS2cloudless_medLV=mask(pecS2cloudless_medLVbbox,tikls100_sauszeme)
 
-#apgriežu līdz LV robežai pēc tīkla:
-pecS2cloudlessMedLV=mask(pecS2cloudlessMEDbbox,tikls100_sauszeme)
 
 #apskatu salīdzinājumā ar 1.1. un 1.2.
 par(mfrow = c(1, 3))
 plot(bezMaskas, main="1.1. Bez mākoņu maskas")
 plot(pecQA60medLV, main="1.2. Pēc QA60 mākoņu maskas")
-plot(pecS2cloudlessMedLV, main="1.3. Pēc s2cloudless mākoņu maskas")
+plot(pecS2cloudless_medLV, main="1.3. Pēc s2cloudless mākoņu maskas")
 par(mfrow = c(1, 1))
 ```
 
+s2cloudless maskā, mākoņu ēnas tiek identificētas uz virsmas pēc pikseļu tumšuma (josla "dark_pixels", kas aprēķināta no B8 joslas), ņemot vērā mākoņa ēnas projekcijas virzienu un attālumu (josla "could_transform"), tā aprēķinot varbūtību, ka tumšais pikselis reāli ir mākoņa ēna, nevis ūdens. Pēc tam no mozaīkas tiek izņemti mākoņu-ēnu laukumiņi un izlīdzināti ar 20m precizitātes buferi. Tādējādi tiek iegūta ēnu maska ("cloudmask").
 
-Secinājums: šī maska pēc teorijas ir daudz precīzāka - tā ņem ne tikai pašus mākoņus (s2 cloud probability), bet arī to ēnas uz Zemes virsmas (s2 surface reflectance). Tā ir galvenā atšķirība no QA60 maskas, kas ņem tikai pašus mākoņus. 
+Secinājums: šī maska pēc teorijas ir daudz precīzāka - tā ņem ne tikai pašus mākoņus (s2 cloud probability), bet arī to ēnas uz Zemes virsmas (s2 surface reflectance). Tā ir galvenā atšķirība no QA60 maskas, kas ņem tikai pašus mākoņus. Bet savukārt mīnuss šai maskai ir tāds, ka vietās, kur visā izvēlētajā periodā ir bijuši mākoņi, ir tukšumi. Tur īsti neko nevar darīt, jo nav bijis iespējams iegūt attēlu bez mākoņiem, tātad attēla nav. Garākiem periodiem šim nevajadzētu radīt problēmas.
 
-# 2. daļa - NDVI aprēķini
-Apsveru izmantot rgee, jo darboties caur GEE ar s2cloudless masku vienkārši nav prouktīvi, jo lielāko daļu laika sanāk cerēt, ka "šoreiz beidzt saies" (grūti bija izturēt atmiņas ierobežojumus GEE api).
-
-# RGEE
-
-Instalēju pakotni (un arī "sf", kas jau ir instalēta, bet atkārtojamībai ievietoju):
-```{r instalRgee, cache=TRUE, message=FALSE, warning=FALSE, results='hide'}
-#install.packages("sf") #---> ja nepieciešams
-install.packages("remotes")
-remotes::install_github("r-spatial/rgee")
+Notīru lieko
+```{r tirisana4, cache=TRUE}
+rm(list = setdiff(ls(), c("tikls100_sauszeme")))
 ```
 
-*TURPINĀJUMS SEKOS*
+
+# 2. daļa - NDVI aprēķini
+Otro uzdevumu daļu veicu atsevišķā GEE skriptā, lai būtu nedaudz pārskatāmāk. 
+Visu veicu 10m izšķirtspējā (lai gan saprotu, ka varēju laikam nemocīties un taisīt 100m)
+Te links - https://code.earthengine.google.com/8386f6ddf9b0b19df9ac0549b4dd54fa?noload=true
+
+## 2.1. NDVI visa laika perioda spektrālo joslu mediānai pēc mākoņu un to ēnu maskēšanas
+
+Rezultātā no GEE pēc 24 stundām tika izgūti četri rastri.
+Apskatu:
+```{r NVDI2.1, cache=TRUE}
+NDVI2_1_DA=rast("./NDVI/2_1_NDVI_Latvija-0000023296-0000023296.tif") 
+NDVI2_1_ZA=rast("./NDVI/2_1_NDVI_Latvija-0000000000-0000023296.tif") 
+NDVI2_1_R=rast("./NDVI/2_1_NDVI_Latvija-0000000000-0000000000.tif") 
+NDVI2_1=rast("./NDVI/2_1_NDVI_Latvija-0000023296-0000000000.tif") 
+
+#apskatu katru, lai identificētu daļas
+plot(NDVI2_1)#tukšs! Dīvaini.
+plot(NDVI2_1_DA)#LV dienvidaustrumi
+plot(NDVI2_1_ZA)# LV ziemeļ–austrumu galiņš
+plot(NDVI2_1_R)# LV rietumi
+```
+
+Tie trīs vēl ir jāapvieno un jāattiecina uz tikls100_sauszeme.
+Izmantošu apvienošanas funkciju, ko iepriekš.
+```{r NDVI2.1apvienosana, cache=TRUE}
+#Apvienoju
+output_dir <- "./NDVI/"
+NDVI2_1saraksts <- list.files(output_dir, pattern = "^2_1.*\\.tif$", full.names = TRUE)
+print(NDVI2_1saraksts)
+
+apvienosanas_funkcija=function(NDVI2_1saraksts){
+    library(terra)
+    #ielasu visus rastrus ar rast()
+    rastru_objekti <- lapply(NDVI2_1saraksts, rast)
+    
+    #pakļauju katru no saraksta rastriem funkcijai mosaic(), ar funkciju "median", jeb, ka tiek paņemta mediānā pikseļa vērtība gadījumā, ja pikseļi pārklājas (bet ja ņemtu "min" vai "max", tam šajā gadījumā nevajadzētu mainīt rezultātu)
+    mozaika <- do.call(mosaic, c(rastru_objekti, list(fun = "median")))
+    
+    #apgriežu līdz tikls100sauszeme
+    mozaika_crop <- crop(mozaika, tikls100_sauszeme)
+    
+    #maskēju
+    mozaika_masked <- mask(mozaika_crop, tikls100_sauszeme)
+
+    # Saglabāju apvienoto rastru mozaīku
+    output_path <- "../Uzd08/2_1_NDVI_apvienots.tif"
+    writeRaster(mozaika_masked, output_path, overwrite = TRUE)
+  }
+
+#palaižu šo funkciju un izmēru, cik laika tā prasa, jo tālāk kaut kas tāds jādara ar lielākiem datiem 2. uzdevuma daļā. 
+apvienosanas_laiks3=system.time({
+  apvienosanas_funkcija(NDVI2_1saraksts)
+})
+
+print(apvienosanas_laiks2)
+
+```
+25 minūtes apvienošanai. Nu, tas šķiet kā nieks, salīdzinot ar 24h, kas pagāja GEE, lai to radītu :)
+
+Apskatu, kas tad sanācis.
+```{r NDVI2.1apskate, cache=TRUE}
+NDVI2_1kopa=rast("2_1_NDVI_apvienots.tif")
+plot(NDVI2_1kopa)
+
+```
+Pagaidām nav ar ko salīdzināt, izskatās normāli, proti, negatīvas (0>x>-1) NDVI vērtības ir ūdenim, atmosfērā mākoņiem (tāpēc svarīga ir to maskēšana, šeit ir ilgāks periots, tāpēc nav tā problemātiskā mākoņu josla Latvijas dienvidaustrumos) un specifiskiem materiāliem, kas skatoties kartē varētu būt kaut kādi metāla jumti pilsētās. 
+Pozitīvas NDVI vērtības ir veģetācijai. Jo tuvāk vērtībai 1, jo blīvāka, veselīgāka veģetācija. 
+
+#2.2. Mediāna no ik spektrālajai joslai aprēķinātā NDVI 
+
+Rezultātā no GEE pēc 20 stundām tika izgūti divi rastri.
+Apskatu:
+```{r NVDI2-2, cache=TRUE}
+NDVI2_2_a=rast("./NDVI/2_2_NDVI_Latvija-0000000000-0000032768.tif")
+NDVI2_2_b=rast("./NDVI/2_2_NDVI_Latvija-0000000000-0000000000.tif")
+
+#apskatu katru, lai identificētu daļas
+plot(NDVI2_2_a) # LV austrumi
+plot(NDVI2_2_b) # LV rietumi
+
+```
+Tagad jāsalīmē kopā un jāattiecina uz 100m tīklu. 
+Viss kā iepriekš. 
+```{r NDVI2.2apvienosana, cache=TRUE}
+#Apvienoju
+output_dir <- "./NDVI/"
+NDVI2_2saraksts <- list.files(output_dir, pattern = "^2_2.*\\.tif$", full.names = TRUE)
+print(NDVI2_2saraksts)
+
+apvienosanas_funkcija=function(NDVI2_2saraksts){
+    library(terra)
+    #ielasu visus rastrus ar rast()
+    rastru_objekti <- lapply(NDVI2_2saraksts, rast)
+    
+    #pakļauju katru no saraksta rastriem funkcijai mosaic(), ar funkciju "median", jeb, ka tiek paņemta mediānā pikseļa vērtība gadījumā, ja pikseļi pārklājas (bet ja ņemtu "min" vai "max", tam šajā gadījumā nevajadzētu mainīt rezultātu)
+    mozaika <- do.call(mosaic, c(rastru_objekti, list(fun = "median")))
+    
+    #apgriežu līdz tikls100sauszeme
+    mozaika_crop <- crop(mozaika, tikls100_sauszeme)
+    
+    #maskēju
+    mozaika_masked <- mask(mozaika_crop, tikls100_sauszeme)
+
+    # Saglabāju apvienoto rastru mozaīku
+    output_path <- "../Uzd08/2_2_NDVI_apvienots.tif"
+    writeRaster(mozaika_masked, output_path, overwrite = TRUE)
+  }
+
+#palaižu šo funkciju un izmēru, cik laika tā prasa, jo tālāk kaut kas tāds jādara ar lielākiem datiem 2. uzdevuma daļā. 
+apvienosanas_laiks4=system.time({
+  apvienosanas_funkcija(NDVI2_2saraksts)
+})
+
+print(apvienosanas_laiks4)
+
+```
+25 minūtes. 
+
+Ielasu un apskatu:
+```{r NDVI2.2apskate, cache=TRUE}
+NDVI2_2kopa=rast("2_2_NDVI_apvienots.tif")
+plot(NDVI2_2kopa)
+
+
+```
+# 2.3. Mediāna no katra gada ik spektrālajai joslai aprēķināto NDVI mediānas
+Rezultātā no GEE pēc 22 stundām tika izgūti divi rastri.
+Apskatu:
+```{r NVDI2-3, cache=TRUE}
+NDVI2_3_a=rast("./NDVI/2_3_NDVI_Latvija-0000000000-0000032768.tif")
+NDVI2_3_b=rast("./NDVI/2_3_NDVI_Latvija-0000000000-0000000000.tif")
+
+#apskatu katru, lai identificētu daļas
+plot(NDVI2_3_a) # LV austrumi
+plot(NDVI2_3_b) # LV rietumi
+
+```
+
+Tālāk viss pēc ierastā - apvienoju, ielasu apskatu un salīdzinu.
+
+```{r NDVI2.3apvienosana, cache=TRUE}
+#Apvienoju
+output_dir <- "./NDVI/"
+NDVI2_3saraksts <- list.files(output_dir, pattern = "^2_3.*\\.tif$", full.names = TRUE)
+print(NDVI2_3saraksts)
+
+apvienosanas_funkcija=function(NDVI2_3saraksts){
+    library(terra)
+    #ielasu visus rastrus ar rast()
+    rastru_objekti <- lapply(NDVI2_3saraksts, rast)
+    
+    #pakļauju katru no saraksta rastriem funkcijai mosaic(), ar funkciju "median", jeb, ka tiek paņemta mediānā pikseļa vērtība gadījumā, ja pikseļi pārklājas (bet ja ņemtu "min" vai "max", tam šajā gadījumā nevajadzētu mainīt rezultātu)
+    mozaika <- do.call(mosaic, c(rastru_objekti, list(fun = "median")))
+    
+    #apgriežu līdz tikls100sauszeme
+    mozaika_crop <- crop(mozaika, tikls100_sauszeme)
+    
+    #maskēju
+    mozaika_masked <- mask(mozaika_crop, tikls100_sauszeme)
+
+    # Saglabāju apvienoto rastru mozaīku
+    output_path <- "../Uzd08/2_3_NDVI_apvienots.tif"
+    writeRaster(mozaika_masked, output_path, overwrite = TRUE)
+  }
+
+#palaižu šo funkciju un izmēru, cik laika tā prasa, jo tālāk kaut kas tāds jādara ar lielākiem datiem 2. uzdevuma daļā. 
+apvienosanas_laiks5=system.time({
+  apvienosanas_funkcija(NDVI2_3saraksts)
+})
+
+print(apvienosanas_laiks5)
+```
+
+Apskatu:
+Ielasu un apskatu:
+```{r NDVI2.3apskate, cache=TRUE}
+NDVI2_3kopa=rast("2_3_NDVI_apvienots.tif")
+plot(NDVI2_3kopa)
+
+
+```
+
+
+# Secinājumi
+Kopumā, drastiskas vizuālas atšķirības rezultātos nesaskatu, tomēr nelielas nianses varētu būt lokāli svarīgas. Katrā ziņā, teorētiski, par šo domājot būtu jāliek kopā atziņas no pirmās uzdevuma daļas, kur tika novēroti "caurumi" kartē dēļ neiegūtas bezmākoņu informācijas. Ja kāds individuāls gads ir bijis izteikti mākoņains, bet cits - izteikti sauss un saulains (kā mūsdienās mēdz būt, piemēram, šogad ir izteikti slapjais gads, kamēr pagāšgad - izteikti sausais), tad būtu svarīgi aprēķināt NDVI katram gadam, un tikai tad rēķināt mediānu no šīs informācijas, tā iegūstot tādu tipisko vērtību. Protams, ja kādā gadā lokāli nav iegūta bezmākoņu sentinel informācija, tad šim gadam sanāk mazāka ietekme uz kopējo rezultātu, nekā citiem gadiem, kad šāda informācija ir pieejama. Papildus, ja tālāk tiek rēķinātas arī starpkvartiļļu amplitūdas (tipiskais mitrais, tipiskais sausais) vai citi NDVI atvasinājumi, tad domāju, ka jāizmanto 2.3. pieeja, jo šādai variācijai pa gadiem lokāli var būt diezgan ievērojama ietekme (palu zonās, piemēram).
