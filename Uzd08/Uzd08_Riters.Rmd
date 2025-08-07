@@ -1,0 +1,97 @@
+---
+title: "Uzd08_Riters"
+author: "Raitis Riters"
+date: "2025-07-01"
+output: md_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Lai izpildītu uzdevumu, man bija nepieciešamas šādas pakotnes:
+```{r, message=FALSE, warning=FALSE}
+library(sf)
+library(arrow)
+library(terra)
+library(googledrive)
+```
+
+No sākuma vajag kaut kā nodefinēt teritoriju GEE.
+Es īsti nezinu, kā strādā GEE koordinātes un tādas lietas, tādēļ es vēlējos izveidot shapefile ar korektām koordinātām.
+```{r}
+parkets<-read_parquet("../Uzd07/tikls100_sauzeme.parquet")
+parkets<-st_as_sf(parkets) 
+```
+
+Pēc sarunas ar Betiju atklājās GEE untumi, kas pieprasa, ka teritorija ir viens liels poligons nevis daudzi mazi. 
+```{r}
+apvienots<-st_union(parkets)
+```
+
+Tālāk pārbaudu, vai ir koordinātu sistēma.
+```{r, cache=TRUE}
+crs(parkets)
+```
+
+Tukšs. Pielikšu koordinātes
+```{r}
+apvienots<-st_set_crs(apvienots, 3059) #No sākuma pielieku ierasto koordinātu sistēmu, lai nekas potenciāli nesagrozās.
+apvienots<-st_transform(apvienots, crs=4326) #Tagad pārveidoju universālāko koordinātu sistēmu, jo, manuprāt, tā varētu būt saderīgāka ar GEE.
+```
+
+Tagad arī ierakstīšu.
+```{r}
+st_write(apvienots, "./tikls100_poligons.shp", driver="ESRI Shapefile")
+```
+
+## GEE kods
+Mans kods meklējams šeit:
+https://code.earthengine.google.com/21ee73236b13a107d7b03b3f8d7edde2
+
+##3. uzdevums
+Lejupielādēšu radīto rastru. 
+Pirms to var darīt, vajag autorizēties ar pakotnes *googledrive* funkciju *drive_auth()* Google kontā, kura diskā glabājas 2.3. solī veidotais rastrs.
+```{r}
+drive_find()
+```
+
+Jāatrod pareizais fails. Paredzu, ka šis var kļūt problemātiski nākotnē, kad ir daudz vairāk failu.
+Visdrīzāk problēmas failu atrašanā var risināt, failus saucot konsikventi un lietojot *.paste* funkcijas.
+Tiesa gan, GEE eksportē failus uz Drive ar sķietami nesakarīgiem skaitļiem beigās, tādēļ varbūt es maldos.
+
+Gan jau ar atmiņas vai citu failu glabāšanas saistītu limitāciju dēļ fails tika pārdalīts. Tas jāsalīmē atpakaļ.
+```{r, cache=TRUE}
+drive_download(file = "GEE_eksports_gada_2018_2024_v2-0000000000-0000032768.tif", path = "./gee_rastrs.tif", overwrite = TRUE)
+drive_download(file = "GEE_eksports_gada_2018_2024_v2-0000000000-0000000000.tif", path = "./gee_rastrs_2.tif", overwrite = TRUE)
+gee_rastrs<-rast("./gee_rastrs.tif")
+gee_rastrs_2<-rast("./gee_rastrs_2.tif")
+salimets<-merge(gee_rastrs, gee_rastrs_2)
+print(salimets)
+```
+
+```{r}
+rastrs10<-rast("../Uzd03/rastrs/LV10m_10km.tif")
+print(rastrs10)
+```
+Izšķirtspēja sakrīt, bet ir nelielas novirzes aptvertajā telpā.
+
+```{r}
+salimets <- resample(salimets, rastrs10)
+print(salimets) #skaisti
+```
+Ielasu 100m rastru
+```{r}
+rastrs100<-rast("../Uzd03/rastrs/LV100m_10km.tif")
+```
+
+Laikam piemērotēkā metode, lai aprēķinātu starpkvartiļu amplitūdu, ir funkcija *aggregate*, ar argumentu fun=IQR.
+Ar *resample*, gluži kā iepriekš, pārliecinos, ka saskan ar references rastru. 
+```{r}
+rastrs_amplituda<- aggregate(salimets, fact = 10, fun = IQR, na.rm = TRUE)
+rastrs_amplituda<- resample(rastrs_amplituda, rastrs100)
+```
+Ierakstu
+```{r, cache=TRUE}
+writeRaster(rastrs_amplituda, "./ndvi_rastrs.tif", overwrite=TRUE)
+```
