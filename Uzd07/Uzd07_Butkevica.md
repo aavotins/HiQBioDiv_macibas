@@ -1,7 +1,7 @@
 Septitais uzdevums: zonālā statistika
 ================
 Jekaterīna Butkeviča
-2025. gads 31. jūlijs
+2025. gads 06. augusts
 
 ## Pakotnes
 
@@ -455,25 +455,25 @@ vid_laiks_2_4 <- mean(laiks_2_4$time) / 1e9
 print(vid_laiks_2_1)
 ```
 
-    ## [1] 12.88618
+    ## [1] 10.13434
 
 ``` r
 print(vid_laiks_2_2)
 ```
 
-    ## [1] 0.4982738
+    ## [1] 0.4793756
 
 ``` r
 print(vid_laiks_2_3)
 ```
 
-    ## [1] 1.28649
+    ## [1] 1.271558
 
 ``` r
 print(vid_laiks_2_4)
 ```
 
-    ## [1] 0.1038069
+    ## [1] 0.09880391
 
 Apskatot dažādu pieeju izpildes laika salīdzinājumu, var secināt, ka gan
 tīkla, gan rastra izšķirtspēja ietekmē izpildes laiku.
@@ -549,9 +549,10 @@ summary(ipatsvars_2_3_4$diff)
 boxplot(ipatsvars_2_3_4$diff, main = "Atšķirības 10m vs 100m LAD (300m centri)")
 ```
 
-![](Uzd07_Butkevica_files/figure-gfm/2_3un_2_4-1.png)<!-- --> Atšķirības
-ir nelielas, nedaudz zem nulles, kas nozīmē, ka 10 m rastrā īpatsvars
-mēdz būt mazliet lielāks nekā 100 m rastrā.
+![](Uzd07_Butkevica_files/figure-gfm/2_3un_2_4-1.png)<!-- -->
+
+Atšķirības ir nelielas, nedaudz zem nulles, kas nozīmē, ka 10 m rastrā
+īpatsvars mēdz būt mazliet lielāks nekā 100 m rastrā.
 
 ## Kādas ir maksimālās teorētiski sagaidāmās atšķirības?
 

@@ -1,7 +1,7 @@
 Piektais uzdevums: procesu dalīšana un rezultātu apvienošana
 ================
 Jekaterīna Butkeviča
-2025. gads 29. jūnijs
+2025. gads 06. augusts
 
 ## Pakotnes
 
@@ -302,7 +302,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 21.67 sekundes
+    ## Visu soļu izpildes ilgums: 21.7 sekundes
 
 ## Otrais apakšuzdevums
 
@@ -395,6 +395,14 @@ writeRaster(uzd2_ipatsvara_lapas_apvienotas,
 
 ``` r
 # Starta laiks
+gc(verbose = FALSE)
+```
+
+    ##            used  (Mb) gc trigger  (Mb)  max used  (Mb)
+    ## Ncells  6455704 344.8   15574057 831.8  15574057 831.8
+    ## Vcells 62513441 477.0  125091717 954.4 116491713 888.8
+
+``` r
 start_time <- Sys.time()
 
 # 2.1. solis:
@@ -404,32 +412,31 @@ for (katrs in lapas_sarakasts_celi) {
   apvienots <- st_intersection(centra_mezi, lapa, left = FALSE)
   lapas_nosaukums <- file_path_sans_ext(basename(katrs))
   fails_nosaukums  <- file.path(output_dir2, paste0(lapas_nosaukums,"mezaudzes_2uzd.parquet"))
-  st_write_parquet(apvienots, fails_nosaukums )
-  }
-
-
+  
+  st_write_parquet(apvienots, fails_nosaukums)
+  
+  # --- Enhanced File Release ---
+  # Increase sleep time to give the OS more time to release the file lock.
+  Sys.sleep(0.5) # Pause for 0.5 seconds (you can try 1.0 if 0.5 isn't enough)
+  gc(verbose = FALSE) # Explicitly run garbage collection to help release resources
+  # --- End Enhanced File Release ---
+}
 
 mezu_lapas_celi_2uzd <- list.files(output_dir2, 
                                    pattern = "^lapa\\d{4}mezaudzes_2uzd\\.parquet$", 
                                    full.names = TRUE)
 
-
-
 # 2.2. solis:
 walk(mezu_lapas_celi_2uzd, 
      ~ mana_funkcija2(mezaudzes = .x, uzdevums = "2"))
-
-
 
 # 2.3. solis:
 uzd2_priedzu_ipatsvars_celi <- list.files(here("5uzd", "Output", "rezultati", "uzd2", "ipatsvars"), 
                                          pattern = "^lapa\\d{4}_uzd2_priezu_ipatsvars_100m\\.tif$", full.names = TRUE)
 uzd2_ipatsvara_lapas <- map(uzd2_priedzu_ipatsvars_celi, rast)
 
-
 uzd2_ipatsvara_lapas_apvienotas <- reduce(uzd2_ipatsvara_lapas, 
-                                          merge)
-
+                                         merge)
 
 #Saglabāt
 writeRaster(uzd2_ipatsvara_lapas_apvienotas, 
@@ -440,7 +447,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 22.81 sekundes
+    ## Visu soļu izpildes ilgums: 25.39 sekundes
 
 ## Trešais apakšuzdevums
 
@@ -577,7 +584,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 18.74 sekundes
+    ## Visu soļu izpildes ilgums: 18.23 sekundes
 
 ## Ceturtais apakšuzdevums
 
@@ -680,7 +687,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 17.13 sekundes
+    ## Visu soļu izpildes ilgums: 16.87 sekundes
 
 ## Piektais apakšuzdevums
 
@@ -750,7 +757,7 @@ end_time <- Sys.time()
 cat("Visu soļu izpildes ilgums:", round(difftime(end_time, start_time, units = "secs"), 2), "sekundes\n")
 ```
 
-    ## Visu soļu izpildes ilgums: 36.55 sekundes
+    ## Visu soļu izpildes ilgums: 37.76 sekundes
 
 ## Kopsavilkums
 
@@ -764,24 +771,24 @@ redzamas karšu lapu malu problēmas.
 
 ### 1. apakšuzdevums
 
-izmantojot `spatial join` lapām ir: 30279, 19510, 32319, 24449
+Izmantojot `spatial join` lapām ir: 30279, 19510, 32319, 24449 ieraksti.
 
 Visu soļu izpildes ilgums: 21,46 sekundes. Malu problēmas ir redzamas.
 
 ### 2. apakšuzdevums
 
-izmantojot `st_intersection` lapām ir: 30279, 19510, 32319, 24449 — tas
-sakrīt ar iepriekšējā apakšuzdevuma rezultātiem.
+Izmantojot `st_intersection` lapām ir: 30279, 19510, 32319, 24449
+ieraksti — tas sakrīt ar iepriekšējā apakšuzdevuma rezultātiem.
 
 Visu soļu izpildes ilgums: 23,68 sekundes. Malu vērtības saglabājas
 precīzi.
 
 ### 3. apakšuzdevums
 
-izmantojot `st_filter` ar argumentu st_within lapām ir: 29548, 18972,
-31561, 23854. Tas ir mazāk nekā citos variantos, jo objekti, kas atrodas
-uz lapu robežām, netika pieskaitīti nevienai no lapām. Visu soļu
-izpildes ilgums: 23,83 sekundes
+Izmantojot `st_filter` ar argumentu st_within lapām ir: 29548, 18972,
+31561, 23854 ieraksti. Tas ir mazāk nekā citos variantos, jo objekti,
+kas atrodas uz lapu robežām, netika pieskaitīti nevienai no lapām. Visu
+soļu izpildes ilgums: 23,83 sekundes
 
 ### 4.apakšuzdevums
 
