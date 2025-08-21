@@ -1,0 +1,339 @@
+---
+title: "Uzd11_Starka"
+author: "Rūta Starka"
+date: "2025-08-19"
+output: rmarkdown::github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Sagatavošanās
+
+Uzdevumam nepieciešamās pakotnes:
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+packages <- c("sf","sfarrow", "terra", "fasterize", "raster", "doParallel", "foreach","ggplot2", "smoothr","tools", "whitebox")
+missing_packages <- packages[!packages %in% installed.packages()[, "Package"]]
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages)
+}
+lapply(packages, require, character.only = TRUE)
+rm (missing_packages, packages)
+```
+
+## EGV par Saules radiāciju 
+
+Ideja šim EGV nāk no bioloģiskās sakarības, ka kukaiņu vielmaiņa ir tiešā veidā saistīta ar temperatūru, kas attiecīgi ietekmē ne tikai to aktivitāti (jāmin, ka tas ietekmē arī konstatējamību!!!), bet arī attīastības ātrumu (caur efektīvo temperatūru summu). Tieši radiācija (nevis temperatūra) ir izrādījusies kā efektīvs EGV taisnspārņu izplatības modelēšanā Eiropas dienvidos (Alpos um citur). Arī citu kukaiņu pētījumos tiek minēta Saules radiācija kā nozīmīgs faktors to bioloģijā. Lai gan Latvijā šāds reljefs nav, līdz ar to arī radiācijas gradients nav saigaidāms, tomēr manuprāt ir būtiski šādu EGV apskatīt un iekļaut vismaz sākotnējos modeļos. Tas paskaidro, kāpēc mēs nevaram "paļauties" uz ekoloģijas pētījumiem "tepat" Eiropā tām pašām sugām. Eiropas dienvidos tā pati suga var dzīvot citādos ekoloģiskajos apstākļos nekā šeit. Latvijā suga var pastāvēt vietās, kur izpildās nepieciešamie apstākļi dzīves cikla nodrošināšanai ilgtermiņā. 
+
+## Darba gaitas kopsavilkums
+
+Tas pieejams [šeit](https://code.earthengine.google.co.in/0ac1617078ef29fb85986b3d1867088e?asset=projects%2Fee-rr11031%2Fassets%2Ftks93_50km_kv_24&noload=true)
+
+Kopsavilkums darba gaitai:
+1) Izvēlējos ERA5-Land Daily Aggregated - ECMWF Climate Reanalysis attēlu kopu
+Pamatojums: pārējās kopās ("Monthly aggregated", vai vienkārši "Daily") nebija pieejama nepieciešamā josla solar_radiation
+
+2) atlasīju joslu (band) ar nosaukumu "surface_net_solar_radiation_sum", jo tā atspoguļo akumulēto radiācijas (mērvienībā J/m^2) daudzumu uz virsmas (kas netiek atstarots atpakaļ no virsmas vai atmosfērā esošajiem mākoņiem). 
+
+Vēl bija iespēja izvēlēties:
+a) surface_solar_radiation_downwards_sum, kas ir visa radiācija, kas sasniedz Zemes virsmu (netiek ņemts vērā, ka daļa tiek atstarota atpakaļ, tāpēc neizvēlējos)
+b) surface_solar_radiation_downwards_min, kas ir a varianta minimālā vērtība
+c) surface_solar_radiation_downwards_max, kas ir a varianta maksimālā vērtība
+d) surface_net_solar_radiation_min, kas ir minimālais radiācijas daudzums uz Zemes virsmas
+e) surface_net_solar_radiation_max, kas attiecīgi ir maksimālais.
+
+3) aprēķināju katram mēnesim (aprīlis līdz oktobris ieskaitot) radiācijas summas mediānu, iekļaujot NA vērtību maskēšanu (citādi ieguvu neīstas nulles vērtības)
+4) katram gadam, no mēnešu mediānām aprēķināju gada mediānu
+5) visam periodam (2017-2023,kas ir tāpat kā pārējiem projekta EGV) aprēķināju mediānu no visu gadu mediānām. 
+
+Rezultāts mani nedaudz pārsteidza, jo sākumā, bez NA maskēšanas ieguvu EGV bez izteikta gradienta, ko es biju skaidrojusi ar to, ka Latvijā nav izteikts reljefs ar dienvidu un ziemeļu nogāzēm, tāpēc saņemtā Saules radiācija ir visai vienmērīga visā valstī: 
+```{r miskaste, cache=TRUE}
+solarBezMaskesanas=rast("./miskaste/Climate_SolarRadiation_cell_NEPAREIZS.tif")
+plot(solarBezMaskesanas)
+```
+
+Bet protams, problēma ir tajā, ka šeit ir 0 vērtības, kurām nav jābūt (nulles ir visur, kur būtu jābūt NA). Radiāciju mēra džoulos uz kvadrātmetru, un ņemot vērā, ka mēs nekādas pazemes alas te nepētam, nav iespējams, ka vidējais saņemtās saules radiācijas daudzums ir nulle. Lai nu kā, lai nepazūd, te [skipts](https://code.earthengine.google.co.in/0ac1617078ef29fb85986b3d1867088e?asset=projects%2Fee-rr11031%2Fassets%2Ftks93_50km_kv_24&noload=true ) šim "nepareizajam" rezultātam.
+
+Tāpēc iestrādāju NA vērtību maskešanu, jau karte kļuva interesantāka, un iespējams būs kaut kam arī derīga.
+
+### GEE skripts
+... ar NA vērtību maskēšanu [te.](https://code.earthengine.google.co.in/fec77e51144c2760b7576ad11fce73db?asset=projects%2Fee-rr11031%2Fassets%2Ftks93_50km_kv_24&noload=true ) 
+
+
+## Salāgošana ar 100 m references rastru
+Tagad analogas darbības 8. uzdevumam. 
+
+Ielasu references tīklu.
+```{r tikls100, eval=FALSE, cache=TRUE}
+ref_rastrs=rast("../Uzd03/ref_rastrs/LV100m_10km.tif")
+
+```
+
+Ielasu no Google diska lejupielādētos četrus rastrus, kas tagad būs jāsalīmē. Tie atrdoas folerī, kas saucās "solar_med_rastri", un meklēju tos, kas satur faila nosaukumā "MASKED".
+
+```{r solarMEDapvienosana, cache=TRUE}
+#Apvienoju
+output_dir <- "./solar_med_rastri/"
+solar_saraksts <- list.files(output_dir, pattern = "MASKED.*\\.tif$", full.names = TRUE)
+print(solar_saraksts)
+
+apvienosanas_funkcija=function(solar_saraksts, ref_rastrs){
+    library(terra)
+    #ielasu visus rastrus ar rast()
+    ref_rastrs=rast("../Uzd03/ref_rastrs/LV100m_10km.tif")
+    rastru_objekti <- lapply(solar_saraksts, rast)
+    
+    #pakļauju katru no saraksta rastriem funkcijai mosaic(), ar funkciju "median", jeb, ka tiek paņemta mediānā pikseļa vērtība gadījumā, ja pikseļi pārklājas
+    mozaika <- do.call(mosaic, c(rastru_objekti, list(fun = "median")))
+    
+    #apgriežu līdz references rastram
+    mozaika_resampled <- resample(mozaika, ref_rastrs)
+    ref_ext <- ext(ref_rastrs)
+    mozaika_crop <- crop(mozaika_resampled, ref_ext)
+  
+    #maskēju
+    mozaika_masked <- mask(mozaika_crop, ref_rastrs)
+
+    # rezultāts - lai paliek vidē, vēl rastru nerakstīšu
+    return(mozaika_masked)
+}
+
+#palaižu funkciju, nosaucu pagaidu rastru par solarMASKED
+solarMASKED=apvienosanas_funkcija(solar_saraksts, ref_rastrs)
+
+plot(solarMASKED)
+```
+Tāpat kā citiem, kas taisīja EGV no ERA5-Land, pie jūras ir datu trūkums, kas izskatās pēc nelabiem robiem. 
+Tā kā iztrūkstošās vietas kopumā ir daudz un potenciāli nozīmīgas kādām sugām, jāveic vērtību paredzēšana un aizvietošana. Ņemot vērā, ka ar to pašu jau saskārās [Betija](https://github.com/aavotins/HiQBioDiv_macibas/blob/Dalibnieki/Uzd11/KlimataEGV_Rubene.md) un [Jekaterīna](https://github.com/aavotins/HiQBioDiv_macibas/blob/Dalibnieki/Uzd11/KlimataEGV_Butkevica.md), nolēmu vērtību aizvietošanu veikt tāpāt kā viņas, jo neko labāku izdomāt nevaru un  ienota pieeja šķiet laba ideja.
+
+```{r save1, cache=TRUE}
+writeRaster(solarMASKED, "solarMASKED.tif", overwrite = TRUE)
+```
+
+Par to es uztaisīšu vēl vienu EGV augsnes temperatūrai (par to zemāk).
+
+## Robu aizpildīšana
+
+Tātad tālākā pieeja ir tātad ne manis izdomāta, un kolēģes jau to ir labi aprakstījušas, tāpēc neko daudz nekomentēšu, tikai pārliecināšos, vai viss sakrīt. 
+
+Skaitu tukšumus. Sagaidu 70118, kā bija arī Betijai un Jekaterinai, kas abas izmantoja to pašu datu avotu.
+
+```{r tuksumi, cache=TRUE}
+tuksumi <- is.na(solarMASKED) & !is.na(ref_rastrs)
+tuksumi_count <- global(tuksumi, fun="sum", na.rm=TRUE)
+tuksumi_count # ieguvu nedaudz mazāk tukšumu - 70032
+
+plot(tuksumi)
+```
+Tagad attālumi līdz tuvākajam pikselim.
+
+```{r netuksumi, cache=TRUE}
+aizpilditie <- ifel(!tuksumi, 1, NA)
+platums <- distance(aizpilditie)
+plot(platums, main = "Attālums līdz tuvākajai ne-NA vērtībai")
+```
+```{r attalums, cache=TRUE}
+max_attalums <- terra::global(platums, fun = "max", na.rm = TRUE)
+print(max_attalums) # lielākais platums ir 3551.056 m (Betijai bija 3551 tikpat)
+```
+veicu tukšumu aizpildīšanu. 
+Lieku tāpat 72, jo lielākā distance no tukšuma centra līdz malai ir nedaudz virs 3551 m, kas atbilst ~ 36 gab 100-metrīgu šūnu, tātad 72 šūnu platumā jāveic aizveitošana.
+
+```{r whitebox, cache=TRUE}
+#notīru vidi, jo saskāros ar RAM problēmām
+rm(list = setdiff(ls(), c("solarMASKED", "ref_rastrs")))
+gc()
+# unlink("path/to/file.extension")
+
+# # instalēju whitebox
+# install.packages("whitebox")#veiksmīgi
+# library(whitebox)#rāda, ka trūkst tools
+# wbt_version()#WhiteboxTools v2.4.0 
+# whitebox::install_whitebox()#darīts, tagad ir tools
+# wbt_init(exe_path='/home/user/path/to/whitebox_tools') # WhiteboxTools Executable Path (whitebox.exe_path) reverted to:
+# 	#D:\Users\RutaStarka\AppData\Roaming/R/data/R/whitebox/WBT/whitebox_tools.exe
+
+#palaižu
+wbt_fill_missing_data(
+  input = "./solarMASKED.tif",
+  output = "./solarMASKED_filled.tif",
+  filter = 72,  
+  weight = 1,
+  no_edges = FALSE # lai notiktu ekstrapolācija gar malām
+)
+```
+
+Ielasu un apskatu. 
+```{r filledApskate, cache=TRUE}
+solarMASKED_filled=rast("solarMASKED_filled.tif")
+plot(solarMASKED_filled)
+```
+Ak vai. Latvija izskatās pēc mākoņa. Tātad būs vēl jāapgriež. Bet citādi (lai gan izskatās, ka ir vēl viens robs zem Engures, ieliku QGISā, pārklāju ar referenci, un viss tur ir kārtībā).
+
+Apskatīšu tukšumu statistiku, kur sagaidu nulli.
+```{r ieprdApskate, cache=TRUE}
+tuksumi2 <- is.na(solarMASKED_filled) & !is.na(ref_rastrs)
+tuksumi_count2 <- global(tuksumi2, fun="sum", na.rm=TRUE)
+tuksumi_count2 # ... un tā arī ir.
+```
+## Izlīdzināšana 
+
+Tad tagad jāsakārto pikseļi. Šobrīd ir tā, ka tur, kur ir interpolēts, ir lēzenas pikseļu vērību pārejas, savukārt tur, kur pārrēķināšana nav veikta - ir vērtību "kluči", kas saistīti ar šo datu izšķirtspēju GEE (pikseļu [izmērs bijis 11132 m](https://developers.google.com/earth-engine/datasets/catalog/ECMWF_ERA5_LAND_DAILY_AGGR#bands), bet tagad pārtaisīts uz 100m). Jāveic izlīdzināšana.
+
+Tagad jāizvēlas loga lielums. 
+Origīnālā izšķirtspēja ir 11132 m/px
+Pielāgotā izšķirtspēja ir 100 m/px
+
+Izlīdzināšanas logu (arguments w) mēra pikseļu skaitā. Tas nozīmē, ka jo lielāka šī te loga vērtība, jo lielāks apkārtējo pikseļu skaits ietekmē izlīdzinātību. Pie w=100, izlīdzināšanā tiek ņemti 100x100 pikseļu, un vina pikseļa izmērs ir 100m, tātad kopā sanāk 10x10km logs. 
+Nedaudz to pielāgojot oriģinālajai izšķirtspējai (11,132 km), tad izvēlēšos w vērtību 111.
+
+```{r smoothing, cache=TRUE}
+solarMASKED_filled_smooth <- focal(solarMASKED_filled, w=111, fun = "mean")
+plot(solarMASKED_filled_smooth)
+```
+## Apgriešana 
+Labi, tagad atliek apgriezt maliņas līdz references rastram, un būs jau gatavs. 
+
+```{r cut, cache=TRUE}
+solar_MFS_cut <- mask(solarMASKED_filled_smooth, ref_rastrs, filename = "./Climate_SolarRadiation_cell_RAW.tif", overwrite=TRUE)
+plot(solar_MFS_cut)
+```
+## Datu centrēšana 
+Tagad rastra skala jāpārvērš, jeb jācentrē ap nulli (SD būs 1 un vidējais būs 0), lai būtu vieglāk šis EGV izmantojams modeļos kopā ar citiem EGV.
+
+```{r centresana, cache=TRUE}
+solar_MFSC_centered= terra::scale(solar_MFS_cut, center = TRUE, scale = TRUE)
+summary(solar_MFSC_centered)#mean ir 0, min -2,36, max 3,72
+terra::global(solar_MFSC_centered, fun = sd, na.rm = TRUE) #SD ir 1
+
+plot(solar_MFSC_centered)
+```
+
+## Saglabāšana
+
+```{r saveUNclean, cache=TRUE}
+# Saglabāju apvienoto rastru mozaīku
+output_path <- "../Uzd11/Climate_SolarRadiation_cell.tif"
+writeRaster(solar_MFSC_centered, output_path, overwrite = TRUE)
+
+rm(list = setdiff(ls(), "ref_rastrs"))
+gc()
+
+```
+
+# EGV augsnes temperatūrai
+
+Ņemot vērā, ka daudzi kukaiņi olas dēj augsnē, un augsnes temperatūra nosaka šo olu attīstības ātrumu (kas var nozīmēt arī dzīves cikla pabeigšanu vai nepabeigšanu), tad domāju, ka būtu derīgs šāds EGV. 
+
+ERA5-Land attēlu krājumā ir dažādi augsnes temperatūras varianti, atkarībā no dziļuma. 
+Es izvēlos temperatūru 0-7cm dziļumā (soil_temperature_level_1), jo reti kuram kukainim svarīgāki būs dziļāki slāņi. 
+
+EGS sagatavošanas skripts ir [šeit](https://code.earthengine.google.co.in/f8bb88a13cdff5707260409233d0ce77?asset=projects%2Fee-rr11031%2Fassets%2Ftks93_50km_kv_24&noload=true).
+
+Tālāk darbojos nedaudz atšķirīgi no Saules radiācijas:
+1) pirmkārt, iemācījos, ka nav jēgas no GEE eksportēt 10m izšķirtspējā, jo paši ERA5 dati ir >19km izšķirtspējā. Tā vietā lejupielādēju 1km izšķirtspējā un tas man ietaupīja DAUDZ laiku (no 2h eksportam uz 2min eksportam +  eksportēts 1 rastras nevis 4, kas jālīmē kopā). 
+
+2) pamēģināšu citu pieeju EGV sagatavošanai šeit. 
+
+## Imports 
+
+```{r soilImport, cache=TRUE}
+augsne=rast("./soil_rastri/soil_temp_MASKED1km.tif")
+plot(augsne)
+```
+## Salāgošana ar 100m references rastru
+
+```{r augsneResample, cache=TRUE}
+augsne_100 <- resample(augsne, ref_rastrs, method = "bilinear", filename = "augsne100.tif", overwrite = TRUE)
+
+plot(augsne_100)
+```
+## Robu analīze
+Tālāk, lai zinātu kā labāk aizpildīt robus, jāuzzina to platumi.
+
+```{r tuksumiAugsnei, cache=TRUE}
+tuksumiAugsnei <- is.na(augsne_100) & !is.na(ref_rastrs)
+tuksumi_countAugsne <- global(tuksumiAugsnei, fun="sum", na.rm=TRUE)
+tuksumi_countAugsne # ieguvu vēl nedaudz mazāk tukšumu - 69557
+
+plot(tuksumiAugsnei)
+```
+```{r netuksumiAugsnei, cache=TRUE}
+aizpilditieAugsnei <- ifel(!tuksumiAugsnei, 1, NA)
+platumsAugsnei <- distance(aizpilditieAugsnei)
+plot(platumsAugsnei, main = "Attālums līdz tuvākajai ne-NA vērtībai")
+```
+```{r attalumsA, cache=TRUE}
+max_attalumsAugsne <- terra::global(platumsAugsnei, fun = "max", na.rm = TRUE)
+print(max_attalumsAugsne) # lielākais platums ir 3600 m 
+```
+Lielākais attālums ir 3600 metri, kas ir 36 gan 100m pikseļu. Tātad atkal ņemam filtra argumentā 72. 
+
+```{r whiteboxAugsne, cache=TRUE}
+#notīru vidi
+rm(list = setdiff(ls(), c("augsne_100", "ref_rastrs")))
+gc()
+
+wbt_fill_missing_data(
+  input = "./augsne100.tif",
+  output = "./augsne100_filled.tif",
+  filter = 72,  
+  weight = 1,
+  no_edges = FALSE
+)
+```
+Ielasu un apskatu. 
+```{r filledApskate2, cache=TRUE}
+augsne100_filled=rast("augsne100_filled.tif")
+plot(augsne100_filled)
+```
+
+## Smoothing ar Whitebox
+
+Pamēģināšu veikt izlīdzināšanu ar kādu no whitebox tools, kas aprakstīti [šeit](https://www.whiteboxgeo.com/manual/wbt_book/available_tools/image_processing_tools_filters.html#meanfilter)
+
+Tur ir dažādi (kādi 7) varianti, no kuriem izvēlējos MeanFilter, kas darbojas līdzīgi kā focal(), jeb ir kustīgais logs, kura izmēru var pielāgot saviem datiem (manā gadījumā tie paši 111 pikseļi būtu piemēroti). Te vienīgi atšķirība, ka ir atsevišķi argumenti priekš x un y, (logs var nebūt kvadrāts, ja vajag), bet tāpat ir jānorāda nepāra skaitlis.  
+
+```{r wbtMEANfilter, cache=TRUE}
+wbt_mean_filter(
+  input = "./augsne100_filled.tif",
+  output = "./ausgne100_fsmooth.tif",
+  filterx=111, 
+  filtery=111,
+)
+```
+
+Ļoti ātri! Mazāk par sekundi.
+Apskatu. 
+```{r fsmoothApskate, cache=TRUE}
+ausgne100_fsmooth=rast("ausgne100_fsmooth.tif")
+plot(ausgne100_fsmooth)
+```
+Nu, ir ļoti izlīdzināts, bez lielas pieredzes grūti teikt, vai ir ok. Liekas ka ir.
+Tagad apgriežu. 
+
+```{r cut2, cache=TRUE}
+ausgne100_fsmooth_cut <- mask(ausgne100_fsmooth, ref_rastrs, filename = "./Soil_TemperatureLevel1_cell_RAW.tif", overwrite=TRUE)
+plot(ausgne100_fsmooth_cut)
+```
+## Centrēšana
+un centrēju
+```{r centresana2, cache=TRUE}
+augsne_MFSC_centered= terra::scale(ausgne100_fsmooth_cut, center = TRUE, scale = TRUE)
+summary(augsne_MFSC_centered)#mean ir 0, min -2,56, max 2,65
+terra::global(augsne_MFSC_centered, fun = sd, na.rm = TRUE) #SD ir 1
+plot(augsne_MFSC_centered)
+```
+
+## Saglabāšana
+
+```{r saveUNclean2, cache=TRUE}
+output_path <- "../Uzd11/Soil_TemperatureLevel1_cell.tif"
+writeRaster(augsne_MFSC_centered, output_path, overwrite = TRUE)
+
+rm(list = ls())
+gc()
+```
+
+Paldies par uzmanību :) 
