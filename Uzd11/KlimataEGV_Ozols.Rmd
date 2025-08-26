@@ -1,0 +1,58 @@
+---
+title: "KlimataEGV_Ozols"
+author: "Janis Ozols"
+output: rmarkdown::github_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Klimata EGV
+11. uzdevumam sagatavoju klimata egv ar nosaukumu: Climate_WinterMinTemp_cell.tif,
+sagatavots GEE, sagatavošanas apraksts: iegūta vidējā ikdienas minimālā temperatūra ziemas mēnešos, no  decembra līdz februārim, katra gada ziemas sezonai, pēc tam aprēķināta vidējā minimālā temperatūra temperatūra no katra gada ziemas sezonas perioda vidējās minimālās temperatūras  no 2016 līdz 2024 gadam.
+Skripts datu lejupielādei no GEE pieejams [šeit](https://code.earthengine.google.co.in/cfe636713bb982ee89232aee52fd20ce?asset=projects%2Fee-rr11031%2Fassets%2Ftikls100_UNIONpolygon)
+Kad fails ir lejupielādēts, pārejam pie tā apstrādes, sagatavojam r vidi darbam
+```{r, pakotnes}
+if (!require("terra")) install.packages("terra");library(terra)
+if (!require("whitebox")) install.packages("whitebox");library(whitebox)
+whitebox::install_whitebox() #ar install packages meta ārā kļūdu, ka nav uzlikts
+```
+Ielādējam lejupielādēto failu un references rastru un resamplojam
+```{r, resample}
+ref100 <- rast("../Uzd03/LV100m_10km.tif")
+klimats <- rast("ERA5L_Tmin_WinterMean_2016_2024.tif")
+klimats <- project(klimats, "EPSG:3059")
+plot(klimats)
+klimats_resample <- resample(klimats, ref100, filename = "vid_aukst_temp.tif", overwrite = TRUE)
+plot(klimats_resample)
+```
+Rastrs ir resamplots, problēma, kas palikusi, ERA5_LAND nesatur datus par jūru un tā, kā flīzes ir 9km, tad rastrā ir lieli robi, kurus nepieciešams aizpildīt.
+```{r,aizpildam}
+robi <- is.na(klimats_resample) & !is.na(ref100)
+pilns <- ifel(!robi, 1, NA)
+platums <- distance(pilns)
+max_attalums <- terra::global(platums, fun = "max", na.rm = TRUE)
+print(max_attalums) 
+#maksimālā vērtība ir 4808, tie ir metri, pārejot uz 100m2, tie ir 48,1m2, tātad 49m2x2=98.
+wbt_fill_missing_data(
+  i = "vid_aukst_temp.tif",
+  output = "klimats_aukstums.tif",
+  filter = 98,  
+  weight = 1,
+  no_edges = FALSE
+)
+aukstums <- rast("klimats_aukstums.tif")
+plot(aukstums)
+```
+Tālāk jāpanāk, lai pikseļu malas nav redzamas, izmantošu funkciju focal no pakotnes terra. Tā kā oriģinālais datu šūnu izmērs ir 9km, kas resamplots uz 100m, tas nozīmē, ka oriģinālā šūna satur 90 100m šūnas, līdz ar to funkcijā w - izmantosim kā 91.
+```{r,focal}
+smooth_aukstums <- focal(aukstums, w=91, fun = "mean")
+plot(smooth_aukstums)
+raw_aukstums <- mask(smooth_aukstums, ref100, filename = "Climate_WinterMinTemp_cell_RAW.tif", overwrite=TRUE)
+plot(raw_aukstums)
+videjais <- global(raw_aukstums,fun = "mean",na.rm = TRUE)
+centrets <- aukstums-videjais[,1]
+standartnovirze <- terra::global(centrets,fun = "rms",na.rm = TRUE)
+merogots <- centrets/standartnovirze[,1]
+writeRaster(merogots, filename = "Climate_WinterMinTemp_cell_scaled.tif", overwrite=TRUE)
+```
+
