@@ -1,33 +1,215 @@
 ---
 title: "Divpadsmitais uzdevums: sugas izplatības modelēšana"
 output: rmarkdown::github_document
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 ## Termiņš
 
-Līdz ~~(2025-02-05)~~ ~~(2025-02-24)~~ **2025-03-03**, izmantojot 
-[fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo) 
-un [pull request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork) uz zaru "Dalibnieki", 
-šī uzdevuma direktorijā pievienojot .Rmd vai .qmd failu, kura nosaukums ir 
-Uzd12_[JusuUzvards], piemēram, `Uzd12_Avotins.Rmd`, kas sagatavots izvadei github 
-dokumentā (piemēram, YAML galvenē norādot `output: rmarkdown::github_document`), 
-un tā radīto izvades failu.
+Līdz **2025-11-03**, izmantojot
+[fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)
+un [pull
+request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
+uz zaru “Dalibnieki”, šī uzdevuma direktorijā pievienojot zinātniski
+noformētu teksta dokumentu, sekojot Latvijas Universitātes Medicīnas un
+Dzīvības zinātņu fakultātes noslēguma darbu vadlīnijām.
+
+Ja ir vēlme dokumentu gatavot, [izmantojot
+R](https://rstudio.github.io/visual-markdown-editing/citations.html),
+pievienojiet arī atsauču ģenerēšanai nepieciešamos failus (parasti - bib
+un csl), izmantojiet Hārvardas stilu atsauču noformēšanai.
 
 ## Premise
 
-Skatīt pamata zarā
+Sugu izplatības modeļi (SDMs) ir plašs statistikas metožu un
+skaitļošanas tehniku klāsts, kas izstrādātas tā, lai prognozētu sugu
+telpisko izplatību, zinot vidi, kurā suga ir sastopama. Metožu loks
+aptver gan klasiskās statistikas metodes kā vispārējos lineāros modeļus
+(GLM) un vispārējos aditīvos modeļus binārai atbildei, dažādas
+mašīmapmācību metodes, piemēram, jauktie meži (*Random Forests*), kuri
+izmanto klātbūtnes-iztrūkuma datus, un maksimuma entropijas analīze
+(*MaxEnt*), un dziļās mašīnmācības metodes (*ANN*, *backpropagation
+neural networks*), kuras spēj strādāt ar tikai klātbūtnes datiem. Lai
+gan vēsturiski plaši lietotas, daudzas datu analīzes metodes spēj
+strādāt tikai ar klātbūtnes-iztrūkuma datiem (GLM, GAM, RF) vai tām ir
+nepieciešams liels datu apjoms (ANN). Maksimuma entropijas analīze ir
+kļuvusi par populārāko SDM rīku, jo tā ir ne tikai samērā vienkārša un
+ātra, tās ietvaros fona vietas izmanto tikai tam, lai raksturotu telpā
+kopumā esošo vidi, neizdarot pieņēmumus par to, ka suga jebkurā no šīm
+vietām nav sastopama. Šī ir nopietna atšķirība no populārākajiem
+risinājumiem klātbūtnes-iztrūkuma metodēm - jebkura vieta ir jāsalīdzina
+ar sugas klātbūtņu vietām, lai izvēlētos modelēšanai nepieciešamās
+nulles. Šāda pieeja ievērojami uzlabo modeļu kvalitātes metrikas, tomēr
+jau pati procedūra ietver neērtu pieņēmumu - esošās zināšanas par sugas
+izvietojumu precīzi raksturo vidi, kura tai ir nepieciešama (šis
+attiecās uz jebkuriem SDMs), bet nepalīdz tālākā risināšanā - kā
+paraugot fona vietas, lai neizpaustos klašu disbalanss, bet izveidotos
+aptvere visiem vides apstākļiem. Šī iemesla dēļ, šajā projektā
+izmantosim maksimuma entropijas analīzi.
 
+Plašākā ekoloģijas kontekstā, svarīgi pieminēt nepilnīgas konstatēšanas
+hierarhiskos modeļus. Šī ir modeļu kopa, kura palīdz risināt dabas
+pētniekiem labi zināmo faktu - ne visas sugas vai visi to indivīdi
+jebkurā laikā ir pieejami uzskaitei (notiek migrācijas, ārpus
+veģetācijas sezonas augi var nebūt pieejami novērošanai, u.tml.) vai var
+būt ne-konstatēti (pamanīti, atpazīti) pat tad, kad tie ir pieejami. Tas
+nozīmē, ka nulles mēdz nebūt patiesas jebkurā dzīvās dabas uzskaitē.
+Tomēr, lai risinātu nepilnīgas konstatēšanas modeļus, ir nepieciešams
+liels daudzums datu - simtiem, vēlams pat tūkstošiem vietu, kurās ir
+veiktas atkārtotās uzskaites ar salīdzināmu metodiku. Diemžēl šādu datu
+nekur pasaulē nav daudz. Ja klātbūtnes dati ir uzticami, tad maksimuma
+entropijas analīzē nulles vietas ir tikai vides kopumā raksturošanai, ja
+nav izteiktas telpiskās atšķirības datu rašanās procesam.
 
+Visbiežāk tomēr novērotāju piepūle nav vienmērīga vai nejauša. Tā kā
+lielākā daļa informācijas par sugu atradnēm mūsdienās ir pieejama no
+sabiedrības zinātnes portāliem, ir jārēķinās, ka sabiedrība potenciāli
+vairāk apmeklē vietas savā tuvumā, sev ērtākās vai populārākās no
+sastopamo sugu viedokļa. Savukārt vēsturisko datu ir potenciāli mazāk,
+pirms to izmantošanas arī ir jāpārliecinās par iespējamām telpiskajām
+īpašībām - novirzēm paraugošanas piepūlē un spējā raksturot aktuālo
+vidi. Šīs novirzes ietekmē jebkuru SDM metodi, ja piepūle (gan telpiskā,
+gan temporālā) nav zināma - vismazākā sagaidāmā ietekme ir
+hierarhiskajiem sastopamības (klātbūtnes un skaita) modeļiem, kuros to
+ir iespējams tieši analizēt. Arī klātbūtnes-iztrūkuma modeļiem, ja
+pieņēmums par drošu konstatēšanu iztur kritiku.
+
+Tā kā sugu novērojumu datubāzes, kuras satur pietiekoši daudz
+informācijas, lai piepūli ņemtu vērā parasti ir nelielas, ir izstrādāti
+integrētie izplatības modeļi. To lietojums ir pietiekoši sarežģīts un no
+skaitļošanas resursu viedokļa - izaicinošs, tomēr ar šīm metodēm ir
+iespējams vienotā informācijas telpā kombinēt datus, kas iegūti ar
+dažādiem protokoliem. Dažādie protokoli ne tikai iekļauj vairākas
+metodikas, kuras izmantot nepilnīgas konstatēšanas hierarhiskajos
+modeļos, ir risinājumi, kas ļauj kombinēt tikai klātbūtnes,
+klātbūtnes-iztrūkuma un sistemātisko uzskaišu rezultātus (kā hierarhisko
+nepilnīgas konstatēšanas modeļu ievades dati). Integrētie izplatības
+modeļi (*ISDMs*) sevī ietver vairākus modeļus vienotā sistēmā, kuras
+viena daļa ir hierarhiskie nepilnīgas konstatēšanas modeļi, kuri veido
+informāciju par sugas pieejamību un konstatējamību, ko tālāk nodod
+klātbūtnes-iztrūkuma vai tikai-klātbūtnes daļai, palīdzot informēt par
+iztrūkumu patiesumu. Savukārt tikai-klātbūtnes vai klātbūtnes-iztrūkuma
+daļas palīdz ar datu apjomu (brīvības pakāpēm), lai raksturotu sugas
+ekoloģisko nišu plašākā gradientu telpā. Šīs ir jaunas metodes, kuras
+pagaidām nav sevišķi bieži izmantotas, piemēru ir maz. Nav skaidrs kā
+veikt paraugošanas piepūles noviržu kontroli.
+
+Sugu izplatības modelēšana nereti tiek saukta arī par ekoloģiskās nišas
+modelēšanu. Šī projekta kontekstā tos lietojam kā sinonīmus, jo mēģinam
+korelatīvi raksturot sugas saistību ar ekoloģiski jēgpilniem
+gradientiem - tās ekoloģisko nišu. Tā kā šie gradienti ir izvietoti
+ģeogrāfiskajā telpā, tos saucam par ekoģeogrāfiskajiem mainīgajiem
+(EGV). Saistība ar ekoloģisko nišu un paši EGV rada vairākus nosacījumus
+un ierobežojumus, kurus ņemt vērā veicot sugu izplatības modelēšanu un
+lietojot tās rezultātus:
+
+-   novērojumiem ir jābūt pietiekoši precīziem telpā un laikā. Jo
+    izteiktāka ir EGV telpiskā variabilitāte, jo augstāka nozīme
+    koordinātu precizitātei. Attiecībā uz temporālo precizitāti, tai ir
+    jābūt tādai, lai novērojums būtu veikts tajā pašā vidē, kurā ir tā
+    koordinātes un kuru raksturo EGV;
+
+-   stacionaritāte atbildes funkcijās. Ir zināms, ka dažādi spēki sugu
+    izplatību ietekmē dažādos mērogos, tāpat arī dažādās telpas daļās ir
+    iespējamas atšķirīgas vienas sugas saistības ar tām pašām pazīmēm.
+    Mēroga atkarības risināšanai ir izstrādātas dažādas pieejas, kuru
+    ietvaros veido sākumā klimatisko modeli, tad augstākas izšķirtspējas
+    vides raksturošanas modeli. Otrajā modelī var iekļaut pirmā modeļa
+    projekciju, tās var apstrādāt atsevišķi vai hierarhiskā sistēmā.
+    Reģionālo atšķirību risināšanai labākā pieeja ir izstrādāt modeli
+    katram reģionam atsevišķi;
+
+-   ekoloģiskais līdzsvars ir nozīmīgs nosacījums, kuru ir grūti
+    pilnvērtīgi ņemt vērā. Vērtējot SDM projekcijas saistībā ar to
+    precizitāti un uzticamību, mums nereti nav zināmas visas izmaiņas,
+    kas vidē ir notikušas. Ir zināms, ka sugu izplatības areāli
+    pārvietojas, ir zināmi piemēri, kur nākotnes klimata iekļaušana SDM
+    projekcijās ir sniegusi labus rezultātus. Ir zināmi arī slikti
+    rezultāti. Viens no iemesliem sliktajiem rezultātiem ir saistīts ar
+    iepriekšējo punktu - dažādos reģionos nereti ir atšķirības atbildes
+    funkcijās, bet varbūt ir bijušas sliktas izvēles modeļa ieviešanā,
+    varbūt ir izpaudušās starpsugu attiecības, bet varbūt novērotais ir
+    dabiska daļa no metapopulāciju procesiem.
+
+Jebkura modeļa izstrādē ir jādomā par konkrēto sugu, kura tiks modelēta
+un kāds būs izstrādātā modeļa mērķis. Protams, par šīm lietām vajadzētu
+domāt arī modeļu vērtētājiem un turpmākajiem lietotājiem. Tomēr šobrīd
+mācamies. Ja izstrādātais modelis ir tāds, kuru plānots pārcelt
+lietošanai jaunā vietā vai laikā, ir jāizdara rūpīgas izvēles attiecībā
+uz telpisko krosvalidāciju, bet arī tas nepasargās, ja jaunais lietojums
+būs reģionā, kurā suga vēl nav ienākusi vai aiz šķēršļa, kuru suga nekad
+nav varējusi dabiski pārvarēt. Sugām, kurām raksturīgi dabiski
+izplatīšanās procesi, vislabāk ir ar iespējami augstu biežumu atkārtot
+modelēšanu, nevis vienmēr paļauties uz seniem modeļiem. Ja sākotnējais
+modelis ir tāds, kurš labi aprakstās korekti noformētos neatkarīgos
+testa datos, tad sugas dabiskajā izplatības areālā tam tādam arī ir
+jābūt. Tomēr projekcijas var kļūt vājākas, vidē ienākot kādām citām
+sugām. Vairums augstāk minēto SDM metožu analizē tikai vienu sugu pašu
+par sevi - jebkuras konkurences vai simbiotiskās attiecības modelī ir
+iekļautas netieši - suga ar savu klātbūtni raksturo apstākļus, kas tai
+ir piemēroti. Ja nepieciešama precīzāka informācija par sugu sabiedrību
+un tās izplatību, ir pieejamas vairāksugu metodes, tomēr tām ir
+nepieciešams liels datu apjoms - vairāki simti vai tūkstoši katrai
+analizējamajai pazīmei -, kurā nevienu sugu neietekmē nepilnīga
+konstatēšana vai ir visas nepieciešamās pazīmes, kas ļauj to risināt.
+
+Ņemot vērā Latvijā pieejamos datus un to apjomu, jo sevišķi par retajām
+un dabas aizsardzībā nozīmīgajām sugām, galvenokārt izmantosim maksimuma
+entropijas analīzi.
 
 ## Uzdevums
 
-Skatīt pamata zarā
+Iepazīstieties ar literatūru un piemēriem sugu izplatības modelēšanā. Ir
+dažādi aspekti, kurus ņemt vērā, izvēloties datu analīzes metodi. Šajā
+projektā mēs izmantosim maksimuma entropijas analīzi. Kā jebkurai datu
+analīzes metodei, arī šai ir dažādas lietas, kuras nepieciešams ņemt
+vērā un ieplānot. Neizbēgami, tās visas ir jāvērtē kopā, tomēr, lai
+darba apjoms būtu samērīgs, katram ir izlozēta tēma, par kuru sagatavot
+referātu. Šos referātus būs jāprezentē (prezentācijas gatavošanai
+drīkstēs izmantot arī citu programmu). Referātu gatavojiet zinātniskā
+stilā, kur vien tas iespējams, izmēģiniet apskatīto izaicinājumu/pieeju
+ietekmi uz rezultātu. Šim nolūkam drīkst izmantot kādu no esošajām jau
+apstrādātajām sugām un sagatavotajiem ekoģeogrāfiskajiem mainīgajiem vai
+radīt sintētiskus datus, veidot simulāciju eksāmenu. Simulāciju
+veidošana nav obligāta, tā būtu patīkama piedeva.
 
-## Padomi
+**Klātbūtnes dati: Vita** Klātbūtnes vietu apjoms, cik izplatīta ir
+novērojumu uzticamības vērtēšana, telpiskā filtrēšana, autokorelācijas
+pārbaude, novērojumu aptvertais laika periods. Kādas ir atšķirības
+klimata un dzīvotņu modelēšanā? Kā atšķiras pieejas neatkarības
+nodrošināšanā ar EGV vairākos telpiskajos līmeņos?
 
-Skatīt pamata zarā
+**Vides kopumā raksturošanas (fona) vietas un piepūles kontrole: Betija** 
+Kas nosaka nepieciešamo fona punktu apjomu? Kādi ir tipiski
+izmantotie skaiti klimata un dzīvotņu modeļos? Kā notiek piepūles
+noviržu kontrole, kādus datus ir raksturīgi tam izmantot? Kā mainās ar
+fona punktiem raksturotā vide, kontrolējot novērotāju piepūlei?
+
+**Apmācības, validācijas un neatkarīgās testēšanas kopas: Rūta** Kas ir
+katra no šīm kopām, kāda ir to loma modelēšanā? Vai un kādas ir
+atšķirības pieejās attiecībā uz fona un klātbūtnes vietām katrā no
+kopām? Kādiem mērķiem labāk kalpo atšķirīgās validācijas kopu izveides
+metodes un kā tas saistās ar fona un klātbūtnes vietām?
+
+**MaxEnt parametrizācija: Marks** Kādi ir galvenie
+hiperparametri/maināmie iestatījumi, kāda ir to nozīme, kurā brīdī tos
+mainīt - jebkurai pazīmju un parametru kombinācijai vai tikai daļai?
+
+**Modeļa kvalitātes metrikas: Jānis** Kādas metrikas tiek izmantotas
+sugu izplatības modeļu izvērtēšanai, ko tās nozīmē un kādi ir to
+ierobežojumi tikai klātbūtnes modeļos? Kuras metrikas rēķina katrai no
+apmācību-validācijas-testēšanas kopām?
+
+**Nulles modeļi: Jekaterīna** Kas ir nulles modeļi, kam tos izmanto sugu
+izplatības modelēšanā, kurām metrikām un kurai no
+apmācību-validēšanas-testēšanas kopām?
+
+**EGV izvēle: Raitis** Kādas ir esošās pieejas MaxEnt EGV izvēlei, vai
+un kādas pieejas drīkst izmantot no klasiskajām klātbūtnes-iztrūkuma
+metodēm?
