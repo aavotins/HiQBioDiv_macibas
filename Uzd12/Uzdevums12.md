@@ -170,6 +170,12 @@ apstrādātajām sugām un sagatavotajiem ekoģeogrāfiskajiem mainīgajiem vai
 radīt sintētiskus datus, veidot simulāciju eksāmenu. Simulāciju
 veidošana nav obligāta, tā būtu patīkama piedeva.
 
+*Darbu drīkst rakstīt latviešu vai angļu valodā pēc autora izvēles.
+Tomēr darba gaitā jebkuram terminam vai vārdam, kuru par tādu uzskatat,
+nepieciešams iekavās norādīt to otrā valodā. Tātad, pamattekstam
+latviešu valodā - oriģinālu angļu valodā, bet pamattekstam angļu valodā
+ieteikt tulkojumu latviešu valodā.*
+
 **Klātbūtnes dati: Vita** Klātbūtnes vietu apjoms, cik izplatīta ir
 novērojumu uzticamības vērtēšana, telpiskā filtrēšana, autokorelācijas
 pārbaude, novērojumu aptvertais laika periods. Kādas ir atšķirības
