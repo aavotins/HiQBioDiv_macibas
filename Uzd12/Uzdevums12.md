@@ -3,7 +3,7 @@ Divpadsmitais uzdevums: sugas izplatības modelēšana
 
 ## Termiņš
 
-Līdz **2025-11-03**, izmantojot
+Līdz **2025-11-10**, izmantojot
 [fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo)
 un [pull
 request](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
@@ -176,7 +176,7 @@ nepieciešams iekavās norādīt to otrā valodā. Tātad, pamattekstam
 latviešu valodā - oriģinālu angļu valodā, bet pamattekstam angļu valodā
 ieteikt tulkojumu latviešu valodā.*
 
-**Klātbūtnes dati: Vita** Klātbūtnes vietu apjoms, cik izplatīta ir
+**Klātbūtnes dati: Jānis** Klātbūtnes vietu apjoms, cik izplatīta ir
 novērojumu uzticamības vērtēšana, telpiskā filtrēšana, autokorelācijas
 pārbaude, novērojumu aptvertais laika periods. Kādas ir atšķirības
 klimata un dzīvotņu modelēšanā? Kā atšķiras pieejas neatkarības
@@ -198,7 +198,7 @@ metodes un kā tas saistās ar fona un klātbūtnes vietām?
 hiperparametri/maināmie iestatījumi, kāda ir to nozīme, kurā brīdī tos
 mainīt - jebkurai pazīmju un parametru kombinācijai vai tikai daļai?
 
-**Modeļa kvalitātes metrikas: Jānis** Kādas metrikas tiek izmantotas
+**Modeļa kvalitātes metrikas: Vita** Kādas metrikas tiek izmantotas
 sugu izplatības modeļu izvērtēšanai, ko tās nozīmē un kādi ir to
 ierobežojumi tikai klātbūtnes modeļos? Kuras metrikas rēķina katrai no
 apmācību-validācijas-testēšanas kopām?
