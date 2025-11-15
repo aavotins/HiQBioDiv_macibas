@@ -267,7 +267,7 @@ Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: ~~(2025-01-20)~~ ~~(2
 
 12. uzdevums: [sugu izplatības modelēšana](./Uzd12/Uzdevums12.md) 
 
-Nosacījumi: *tiek izstrādāti*; Risinājuma iesniegšana līdz: ~~(2025-02-05)~~ ~~(2025-02-24)~~ ~~(2025-03-03)~~
+Nosacījumi: **pieejami**; Risinājuma iesniegšana līdz: **(2025-11-19)**
 
 13. uzdevums: [asociācijas un preferences dzīvotņu piemērotībā](./Uzd13/Uzdevums13.md) 
 
